@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+# 実行時に生成される解答画像・読み取り結果
+*_answer.png
+*_読み取り結果.txt
+inputs/
+
+# 画像はリポジトリに登録しない（テスト画像は tools/make_test_images.py で作成）
+*.png
+*.jpg
+*.jpeg

@@ -1,0 +1,4 @@
+opencv-python-headless
+numpy
+# tools/ の画像生成スクリプトを動かす場合のみ
+pillow
