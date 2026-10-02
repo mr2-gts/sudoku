@@ -121,7 +121,7 @@ def extract_digit(cell_bin: np.ndarray) -> np.ndarray | None:
             continue  # 中央から外れている
         if area > best_area:
             best, best_area = i, area
-    if best == -1 or best_area < h * w * 0.03:
+    if best == -1 or best_area < h * w * 0.05:  # 画面のモアレなどの細かい点の塊を数字と誤認しないよう、面積の下限を設ける
         return None
     return np.where(labels == best, 255, 0).astype(np.uint8)
 
