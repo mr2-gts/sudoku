@@ -7,7 +7,7 @@
 // 処理の流れ（Python 版と同じ）:
 //   1. 盤面検出 … 適応的2値化し、いちばん大きい塊の凸包から四隅を求める。
 //   2. 歪み補正 … 四隅から射影変換して 450x450 の正方形にする。
-//   3. マス分割 … 50x50 ずつ 81 マスに分け、中央付近の大きな塊を数字とみなす。
+//   3. マス分割 … 50x50 ずつ 81 マスに分け、中央付近の、背景よりはっきり濃い塊を数字とみなす。
 //   4. 数字認識 … 28x28 に正規化し、見本データと比べる k 近傍法（k=5）。
 
 export const CELL = 50; // 補正後の1マスのピクセル数
@@ -337,21 +337,58 @@ export function warpBoard(gray, corners) {
 // ---------------------------------------------------------------------------
 
 // 1マス分の2値画像から数字部分だけを取り出す。数字がなければ null。
-// マスの縁に残る罫線を避けるため、中央付近にあり、ある程度の大きさを持つ塊だけを数字とみなす。
-export function extractDigit(cell) {
+// 次の条件を満たす塊を数字の一部とみなし、まとめて1つの数字にする（Python 版と同じ）。
+// - 罫線ではない（マスの幅・高さいっぱいに伸びていない）
+// - マスの中央付近にある（縁に残る罫線の切れ端を避ける）
+// - 背景よりはっきり濃い（画面のモアレや紙のざらつきは薄いので除外できる）
+// 細い書体では1つの数字がいくつかの塊に分かれることがあるため、塊をまとめてから大きさを判定する。
+export const MIN_CONTRAST = 45; // 数字とみなす濃さの下限（背景の明るさとの差、0〜255）
+
+function median(data) {
+  const hist = new Uint32Array(256);
+  for (const v of data) hist[v]++;
+  const half = data.length / 2;
+  let acc = 0;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc > half) return v;
+    if (acc === half) { // 要素数が偶数で、ちょうど真ん中で分かれるときは前後の平均（numpy.median と同じ）
+      let u = v + 1;
+      while (!hist[u]) u++;
+      return (v + u) / 2;
+    }
+  }
+  return 0;
+}
+
+export function extractDigit(cell, cellGray) {
   const { w, h } = cell;
   const { labels, stats } = connectedComponents(cell);
-  let best = -1, bestArea = 0;
+  const background = median(cellGray.data);
+  const sums = new Float64Array(stats.length);
+  for (let i = 0; i < labels.length; i++) if (labels[i]) sums[labels[i]] += cellGray.data[i];
+  const keep = new Uint8Array(stats.length);
+  let any = false;
   for (let i = 1; i < stats.length; i++) {
     const s = stats[i];
-    if (s.h < h * 0.3 || s.w > w * 0.9 || s.h > h * 0.95) continue; // 小さすぎる点・罫線
-    if (!(w * 0.2 < s.cx && s.cx < w * 0.8 && h * 0.2 < s.cy && s.cy < h * 0.8)) continue; // 中央から外れている
-    if (s.area > bestArea) (best = i), (bestArea = s.area);
+    if (s.area < 8 || s.w > w * 0.9 || s.h > h * 0.95) continue; // ごく小さい点・罫線
+    if (!(w * 0.15 < s.cx && s.cx < w * 0.85 && h * 0.15 < s.cy && s.cy < h * 0.85)) continue; // 中央から外れている
+    if (background - sums[i] / s.area < MIN_CONTRAST) continue; // 薄いノイズ
+    keep[i] = 1;
+    any = true;
   }
-  // 画面のモアレなどの細かい点の塊を数字と誤認しないよう、面積の下限を設ける
-  if (best === -1 || bestArea < h * w * 0.05) return null;
+  if (!any) return null;
   const out = newImage(w, h);
-  for (let i = 0; i < labels.length; i++) out.data[i] = labels[i] === best ? 255 : 0;
+  let y0 = h, y1 = -1, area = 0;
+  for (let i = 0; i < labels.length; i++) {
+    if (!keep[labels[i]] || !labels[i]) continue;
+    out.data[i] = 255;
+    area++;
+    const y = (i - (i % w)) / w;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  if (y1 - y0 + 1 < h * 0.3 || area < h * w * 0.02) return null; // 数字にしては小さすぎる
   return out;
 }
 
@@ -431,11 +468,15 @@ export function readPuzzle(gray, classifier) {
   const size = CELL - 2 * m;
   for (let r = 0; r < 9; r++) {
     for (let c = 0; c < 9; c++) {
-      const cell = newImage(size, size);
+      const cell = newImage(size, size), cellGray = newImage(size, size);
       for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) cell.data[y * size + x] = bin.data[(r * CELL + m + y) * BOARD + c * CELL + m + x];
+        for (let x = 0; x < size; x++) {
+          const src = (r * CELL + m + y) * BOARD + c * CELL + m + x;
+          cell.data[y * size + x] = bin.data[src];
+          cellGray.data[y * size + x] = board.data[src];
+        }
       }
-      const digit = extractDigit(cell);
+      const digit = extractDigit(cell, cellGray);
       if (!digit) {
         grid.push(0);
         confidence.push(1);
