@@ -36,6 +36,8 @@ CELL = 50  # 補正後の1マスのピクセル数
 BOARD = CELL * 9
 MODEL_PATH = Path(__file__).with_name("digit_model.npz")
 MIN_CONTRAST = 45  # 数字とみなす濃さの下限（背景の明るさとの差、0〜255）。写真の数字は 60 以上、ノイズは 40 以下だった
+WEAK_CONTRAST_RATIO = 0.25  # 数字の濃い部分の何割の濃さまでを、つながった線として数字に含めるか
+WEAK_CONTRAST_MIN = 15  # 同上の下限（背景の明るさとの差）
 
 
 class ImageReadError(Exception):
@@ -130,10 +132,17 @@ def extract_digit(cell_bin: np.ndarray, cell_gray: np.ndarray) -> np.ndarray | N
         keep.append(i)
     if not keep:
         return None
-    mask = np.isin(labels, keep)
-    ys, xs = np.nonzero(mask)
-    if ys.max() - ys.min() + 1 < h * 0.3 or mask.sum() < h * w * 0.02:
-        return None  # 数字にしては小さすぎる
+    seed = np.isin(labels, keep)
+    ys, xs = np.nonzero(seed)
+    if ys.max() - ys.min() + 1 < h * 0.3 or seed.sum() < h * w * 0.02:
+        return None  # 数字にしては小さすぎる（数字かどうかは、はっきり濃い部分だけで判定する）
+    # 細い線（4 の斜め線など）は2値化で消えたり途切れたりしやすいので、はっきり濃い塊を起点に、
+    # それとつながる「やや薄い」画素まで数字の範囲を広げる（ヒステリシスしきい値処理）。
+    contrast = background - cell_gray.astype(np.float32)
+    peak = float(np.percentile(contrast[seed], 90))
+    weak = (contrast >= max(WEAK_CONTRAST_MIN, peak * WEAK_CONTRAST_RATIO)) | seed
+    _, grown = cv2.connectedComponents(weak.astype(np.uint8), connectivity=8)
+    mask = np.isin(grown, np.unique(grown[seed]))
     return np.where(mask, 255, 0).astype(np.uint8)
 
 
