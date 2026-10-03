@@ -11,6 +11,22 @@ python -m unittest test_sudoku_solver test_sudoku_image  # テスト
 
 ライブラリとしては `parse(text) -> list[int]` と `solve(grid, max_solutions=1) -> Result` を使う。
 
+## Web版（スマホのカメラで解く）
+
+`docs/` はスマホのブラウザで開くWebページ。「カメラで撮影」で撮った写真をその場で読み取り、解答を表示する（黒=問題の数字、青=答え）。写真はブラウザの中だけで処理し、どこにも送信・保存しない。読み取りを誤ったときは、マスをタップして直してから解き直せる。写真を使わず手で入力することもできる。
+
+公開手順（GitHub Pages、最初に1回だけ）: リポジトリの Settings → Pages → Build and deployment で Source を「Deploy from a branch」、Branch を `main` / `/docs` にして Save。数分後に `https://mr2-gts.github.io/sudoku/` で開ける。
+
+| ファイル | 役割 |
+|---|---|
+| `docs/index.html` `docs/style.css` | 画面 |
+| `docs/app.js` | 画面の操作（写真の読み込み → 読み取り → 解く → 表示、修正） |
+| `docs/vision.js` | `sudoku_image.py` の読み取り処理の移植。OpenCV は使わず、必要な画像処理を自前で実装（ページが軽く、外部サービスに依存しない）。|
+| `docs/solver.js` | `sudoku_solver.py` の移植 |
+| `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 640KB） |
+
+大きな写真は長辺 1200 ピクセルに縮小してから読み取る。テスト画像 12 枚すべてで Python 版と同じく正しく読み取れることを確認した（1枚 0.5 秒前後、PC の Chromium）。`node --test test_web_solver.mjs` でソルバーのテストを実行できる。手元で試すときは `python -m http.server -d docs` などで配信して開く（ファイルを直接開くと見本データを読み込めない）。
+
 ## 入力形式
 
 1〜9 は数字、空きは `0` か `.`。それ以外の文字（空白・改行・`|` `-` `+`）は無視するので、9行×9文字でも81文字1行でもよい。

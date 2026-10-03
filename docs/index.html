@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ナンプレ カメラ解答</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>ナンプレ カメラ解答</h1>
+    <p class="note">写真はこの端末の中だけで読み取ります。どこにも送信・保存しません。</p>
+
+    <div class="buttons">
+      <label class="button primary">カメラで撮影
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="button">写真を選ぶ
+        <input id="picker" type="file" accept="image/*" hidden>
+      </label>
+    </div>
+    <p class="hint">盤面全体が写るよう、なるべく真上から撮ってください。</p>
+
+    <p id="status" class="status" role="status"></p>
+
+    <section id="result" hidden>
+      <div id="grid" class="grid" aria-label="盤面"></div>
+      <p id="legend" class="legend"></p>
+
+      <div id="editor" hidden>
+        <div class="pad" id="pad"></div>
+        <div class="buttons">
+          <button id="solve" class="button primary" type="button">この内容で解く</button>
+        </div>
+      </div>
+      <div class="buttons">
+        <button id="edit" class="button" type="button">読み取り結果を直す</button>
+      </div>
+
+      <details id="preview-box">
+        <summary>読み取った盤面の画像</summary>
+        <canvas id="preview" width="450" height="450"></canvas>
+      </details>
+    </section>
+
+    <p class="footer"><a href="#" id="manual">写真を使わず手で入力する</a></p>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
