@@ -343,6 +343,15 @@ export function warpBoard(gray, corners) {
 // - 背景よりはっきり濃い（画面のモアレや紙のざらつきは薄いので除外できる）
 // 細い書体では1つの数字がいくつかの塊に分かれることがあるため、塊をまとめてから大きさを判定する。
 export const MIN_CONTRAST = 45; // 数字とみなす濃さの下限（背景の明るさとの差、0〜255）
+export const WEAK_CONTRAST_RATIO = 0.25; // 数字の濃い部分の何割の濃さまでを、つながった線として数字に含めるか
+export const WEAK_CONTRAST_MIN = 15; // 同上の下限（背景の明るさとの差）
+
+// numpy.percentile と同じ（線形補間）
+function percentile(values, q) {
+  const v = Float64Array.from(values).sort();
+  const pos = ((v.length - 1) * q) / 100, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return v[lo] + (v[hi] - v[lo]) * (pos - lo);
+}
 
 function median(data) {
   const hist = new Uint32Array(256);
@@ -378,17 +387,31 @@ export function extractDigit(cell, cellGray) {
     any = true;
   }
   if (!any) return null;
-  const out = newImage(w, h);
+  // 数字かどうかは、はっきり濃い部分（seed）だけで判定する
+  const seed = new Uint8Array(w * h);
   let y0 = h, y1 = -1, area = 0;
   for (let i = 0; i < labels.length; i++) {
-    if (!keep[labels[i]] || !labels[i]) continue;
-    out.data[i] = 255;
+    if (!labels[i] || !keep[labels[i]]) continue;
+    seed[i] = 1;
     area++;
     const y = (i - (i % w)) / w;
     if (y < y0) y0 = y;
     if (y > y1) y1 = y;
   }
   if (y1 - y0 + 1 < h * 0.3 || area < h * w * 0.02) return null; // 数字にしては小さすぎる
+  // 細い線（4 の斜め線など）は2値化で消えたり途切れたりしやすいので、はっきり濃い塊を起点に、
+  // それとつながる「やや薄い」画素まで数字の範囲を広げる（ヒステリシスしきい値処理）。
+  const seedContrast = [];
+  for (let i = 0; i < seed.length; i++) if (seed[i]) seedContrast.push(background - cellGray.data[i]);
+  const peak = percentile(seedContrast, 90);
+  const weakMin = Math.max(WEAK_CONTRAST_MIN, peak * WEAK_CONTRAST_RATIO);
+  const weak = newImage(w, h);
+  for (let i = 0; i < weak.data.length; i++) weak.data[i] = seed[i] || background - cellGray.data[i] >= weakMin ? 1 : 0;
+  const grown = connectedComponents(weak).labels;
+  const touched = new Set();
+  for (let i = 0; i < seed.length; i++) if (seed[i]) touched.add(grown[i]);
+  const out = newImage(w, h);
+  for (let i = 0; i < grown.length; i++) out.data[i] = grown[i] && touched.has(grown[i]) ? 255 : 0;
   return out;
 }
 
