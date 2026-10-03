@@ -35,6 +35,9 @@ from sudoku_solver import SudokuError, format_grid, solve
 CELL = 50  # 補正後の1マスのピクセル数
 BOARD = CELL * 9
 MODEL_PATH = Path(__file__).with_name("digit_model.npz")
+MIN_CONTRAST = 45  # 数字とみなす濃さの下限（背景の明るさとの差、0〜255）。写真の数字は 60 以上、ノイズは 40 以下だった
+WEAK_CONTRAST_RATIO = 0.25  # 数字の濃い部分の何割の濃さまでを、つながった線として数字に含めるか
+WEAK_CONTRAST_MIN = 15  # 同上の下限（背景の明るさとの差）
 
 
 class ImageReadError(Exception):
@@ -104,26 +107,43 @@ class DigitClassifier:
         return digit, votes[digit] / self.k
 
 
-def extract_digit(cell_bin: np.ndarray) -> np.ndarray | None:
+def extract_digit(cell_bin: np.ndarray, cell_gray: np.ndarray) -> np.ndarray | None:
     """1マス分の2値画像から数字部分だけを取り出す。数字がなければ None。
 
-    マスの縁に残る罫線を避けるため、中央付近にあり、ある程度の大きさを持つ塊だけを数字とみなす。
+    次の条件を満たす塊を数字の一部とみなし、まとめて1つの数字にする。
+    - 罫線ではない（マスの幅・高さいっぱいに伸びていない）
+    - マスの中央付近にある（縁に残る罫線の切れ端を避ける）
+    - 背景よりはっきり濃い（画面のモアレや紙のざらつきは薄いので除外できる）
+    細い書体では1つの数字がいくつかの塊に分かれることがあるため、塊をまとめてから大きさを判定する。
     """
     h, w = cell_bin.shape
     n, labels, stats, cents = cv2.connectedComponentsWithStats(cell_bin, 8)
-    best, best_area = -1, 0
+    background = float(np.median(cell_gray))
+    keep = []
     for i in range(1, n):
         x, y, bw, bh, area = stats[i]
         cx, cy = cents[i]
-        if bh < h * 0.3 or bw > w * 0.9 or bh > h * 0.95:
-            continue  # 小さすぎる点・罫線
-        if not (w * 0.2 < cx < w * 0.8 and h * 0.2 < cy < h * 0.8):
+        if area < 8 or bw > w * 0.9 or bh > h * 0.95:
+            continue  # ごく小さい点・罫線
+        if not (w * 0.15 < cx < w * 0.85 and h * 0.15 < cy < h * 0.85):
             continue  # 中央から外れている
-        if area > best_area:
-            best, best_area = i, area
-    if best == -1 or best_area < h * w * 0.05:  # 画面のモアレなどの細かい点の塊を数字と誤認しないよう、面積の下限を設ける
+        if background - float(cell_gray[labels == i].mean()) < MIN_CONTRAST:
+            continue  # 薄いノイズ
+        keep.append(i)
+    if not keep:
         return None
-    return np.where(labels == best, 255, 0).astype(np.uint8)
+    seed = np.isin(labels, keep)
+    ys, xs = np.nonzero(seed)
+    if ys.max() - ys.min() + 1 < h * 0.3 or seed.sum() < h * w * 0.02:
+        return None  # 数字にしては小さすぎる（数字かどうかは、はっきり濃い部分だけで判定する）
+    # 細い線（4 の斜め線など）は2値化で消えたり途切れたりしやすいので、はっきり濃い塊を起点に、
+    # それとつながる「やや薄い」画素まで数字の範囲を広げる（ヒステリシスしきい値処理）。
+    contrast = background - cell_gray.astype(np.float32)
+    peak = float(np.percentile(contrast[seed], 90))
+    weak = (contrast >= max(WEAK_CONTRAST_MIN, peak * WEAK_CONTRAST_RATIO)) | seed
+    _, grown = cv2.connectedComponents(weak.astype(np.uint8), connectivity=8)
+    mask = np.isin(grown, np.unique(grown[seed]))
+    return np.where(mask, 255, 0).astype(np.uint8)
 
 
 @dataclass
@@ -149,8 +169,8 @@ def read_puzzle(image_path: str | Path, classifier: DigitClassifier | None = Non
     m = CELL // 10  # 罫線を避ける余白
     for r in range(9):
         for c in range(9):
-            cell = binary[r * CELL + m : (r + 1) * CELL - m, c * CELL + m : (c + 1) * CELL - m]
-            digit_img = extract_digit(cell)
+            ys, xs = slice(r * CELL + m, (r + 1) * CELL - m), slice(c * CELL + m, (c + 1) * CELL - m)
+            digit_img = extract_digit(binary[ys, xs], board[ys, xs])
             if digit_img is None:
                 grid.append(0)
                 conf.append(1.0)
