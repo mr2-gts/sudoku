@@ -65,7 +65,7 @@ const MESSAGES = {
 const requested = new URLSearchParams(location.search).get("lang");
 // Object.hasOwn は iOS 15.3 以前の Safari に無く、ページ全体が動かなくなるため使わない。
 // navigator.language は優先言語の先頭（navigator.languages[0]、Accept-Language の先頭）と同じ値になる（Chrome で確認）。
-export const lang = Object.keys(MESSAGES).includes(requested)
+const lang = Object.keys(MESSAGES).includes(requested)
   ? requested
   : navigator.language.startsWith("ja") ? "ja" : "en";
 
@@ -79,6 +79,8 @@ document.documentElement.lang = lang;
 document.title = t("title");
 for (const el of document.querySelectorAll("[data-i18n]")) el.textContent = t(el.dataset.i18n);
 for (const el of document.querySelectorAll("[data-i18n-label]")) el.setAttribute("aria-label", t(el.dataset.i18nLabel));
+// 切替リンクは ?lang= を付けてページを開き直すので、表示中の盤面は消える。
+// 切り替えるのはふつう開いた直後なので、開き直さずに文言だけ差し替える仕組み（表示中のメッセージも訳し直す必要がある）は入れていない。
 const other = lang === "ja" ? "en" : "ja";
 const langSwitch = document.getElementById("lang-switch");
 langSwitch.href = `?lang=${other}`;
