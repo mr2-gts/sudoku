@@ -3,6 +3,7 @@
 
 import { DigitClassifier, readPuzzle } from "./vision.js";
 import { SudokuError, solve } from "./solver.js";
+import { t } from "./i18n.js";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）
 const UNSURE = 0.6; // 確からしさがこれ未満のマスを「不確か」として色を付ける
@@ -21,7 +22,7 @@ const state = {
 // ---------------------------------------------------------------------------
 const classifierPromise = (async () => {
   const res = await fetch("digit_model.bin.gz");
-  if (!res.ok) throw new Error(`見本データを読み込めません（${res.status}）`);
+  if (!res.ok) throw new Error(t("modelError", { status: res.status }));
   let buf = await res.arrayBuffer();
   const head = new Uint8Array(buf, 0, 2);
   if (head[0] === 0x1f && head[1] === 0x8b) {
@@ -55,7 +56,7 @@ async function onPhoto(event) {
   const file = event.target.files[0];
   event.target.value = ""; // 同じ写真を選び直せるようにし、参照も残さない
   if (!file) return;
-  setStatus("読み取り中…");
+  setStatus(t("reading"));
   await new Promise((r) => setTimeout(r, 30)); // 表示を更新してから重い処理に入る
   try {
     const [gray, classifier] = await Promise.all([loadGray(file), classifierPromise]);
@@ -66,7 +67,7 @@ async function onPhoto(event) {
     solveAndShow();
   } catch (e) {
     console.error(e);
-    setStatus(`読み取れませんでした: ${e.message}`, true);
+    setStatus(t("readError", { message: e.message }), true);
   }
 }
 
@@ -88,30 +89,31 @@ function solveAndShow() {
   let reason = "";
   if (clues < 17) {
     // 解が一意な数独は最低 17 個の数字が必要
-    reason = `読み取れた数字が ${clues} 個しかありません。盤面全体が写るように撮り直すか、手で直してください。`;
+    reason = t("tooFew", { count: clues });
   } else {
     try {
       const r = solve(state.puzzle, 2);
-      if (!r.solution) reason = "解がありません。読み取りを誤った可能性があります。";
-      else if (r.solutionCount > 1) reason = "解が複数あります。数字を読み落とした可能性があります。";
+      if (!r.solution) reason = t("noSolution");
+      else if (r.solutionCount > 1) reason = t("multiple");
       else state.solution = r.solution;
     } catch (e) {
       if (!(e instanceof SudokuError)) throw e;
-      reason = `${e.message}。読み取りを誤った可能性があります。`;
+      // 画面から渡す盤面は常に 0〜9 の 81 マスなので、SudokuError になるのは数字の重複のときだけ
+      reason = t("duplicate");
     }
   }
 
   $("result").hidden = false;
   if (state.solution) {
-    setStatus("解けました");
+    setStatus(t("solved"));
     setEditing(false);
   } else {
-    setStatus(`解けませんでした: ${reason}`, true);
+    setStatus(t("unsolved", { reason }), true);
     setEditing(true);
   }
   $("legend").textContent = [
-    state.solution ? "黒 = 問題の数字、青 = 答え。" : "数字のマスをタップして直し、「この内容で解く」を押してください。",
-    unsure ? "黄色 = 読み取りが不確かなマス。" : "",
+    state.solution ? t("legendSolved") : t("legendFix"),
+    unsure ? t("legendUnsure") : "",
   ].join(" ");
   renderGrid();
 }
@@ -170,7 +172,7 @@ function setStatus(text, isError = false) {
 for (const d of [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]) {
   const b = document.createElement("button");
   b.type = "button";
-  b.textContent = d ? String(d) : "消す";
+  b.textContent = d ? String(d) : t("erase");
   b.addEventListener("click", () => inputDigit(d));
   $("pad").append(b);
 }
@@ -180,7 +182,7 @@ $("solve").addEventListener("click", solveAndShow);
 $("edit").addEventListener("click", () => {
   setEditing(true);
   setStatus("");
-  $("legend").textContent = "数字のマスをタップして直し、「この内容で解く」を押してください。";
+  $("legend").textContent = t("legendFix");
   renderGrid();
 });
 $("manual").addEventListener("click", (e) => {
@@ -192,7 +194,7 @@ $("manual").addEventListener("click", (e) => {
   $("preview-box").hidden = true;
   setEditing(true);
   setStatus("");
-  $("legend").textContent = "マスをタップして数字を入れ、「この内容で解く」を押してください。";
+  $("legend").textContent = t("legendManual");
   renderGrid();
 });
 classifierPromise.catch((e) => setStatus(e.message, true));
