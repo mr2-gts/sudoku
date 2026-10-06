@@ -63,7 +63,9 @@ const MESSAGES = {
 };
 
 const requested = new URLSearchParams(location.search).get("lang");
-export const lang = Object.hasOwn(MESSAGES, requested ?? "")
+// Object.hasOwn は iOS 15.3 以前の Safari に無く、ページ全体が動かなくなるため使わない。
+// navigator.language は優先言語の先頭（navigator.languages[0]、Accept-Language の先頭）と同じ値になる（Chrome で確認）。
+export const lang = Object.keys(MESSAGES).includes(requested)
   ? requested
   : navigator.language.startsWith("ja") ? "ja" : "en";
 

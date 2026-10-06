@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ナンプレ カメラ解答</title>
-  <!-- 英語表示のときに日本語が一瞬見えないよう、文言の差し替えを先に読み込む -->
+  <!-- 英語表示のときに日本語が見える時間を短くするため、文言の差し替えを先に読み込む。
+       module は描画を止めないので、回線が遅いと日本語が一瞬見えることはある。確実に防ぐには差し替えが終わるまで
+       画面を隠す必要があるが、読み込みに失敗すると白紙になるため、そこまではしていない。 -->
   <script type="module" src="i18n.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>

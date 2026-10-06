@@ -98,7 +98,9 @@ function solveAndShow() {
       else state.solution = r.solution;
     } catch (e) {
       if (!(e instanceof SudokuError)) throw e;
-      // 画面から渡す盤面は常に 0〜9 の 81 マスなので、SudokuError になるのは数字の重複のときだけ
+      // 画面から渡す盤面は常に 0〜9 の 81 マスなので、SudokuError になるのは数字の重複のときだけ。
+      // e.message は日本語なので表示に使わない。重複以外の SudokuError が起こりうるようになったら、
+      // solver.js の SudokuError に種類を表すコードを持たせて見分ける。
       reason = t("duplicate");
     }
   }
