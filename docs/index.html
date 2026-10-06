@@ -4,46 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ナンプレ カメラ解答</title>
+  <!-- 英語表示のときに日本語が見える時間を短くするため、文言の差し替えを先に読み込む。
+       module は描画を止めないので、回線が遅いと日本語が一瞬見えることはある。確実に防ぐには差し替えが終わるまで
+       画面を隠す必要があるが、読み込みに失敗すると白紙になるため、そこまではしていない。 -->
+  <script type="module" src="i18n.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
-    <h1>ナンプレ カメラ解答</h1>
-    <p class="note">写真はこの端末の中だけで読み取ります。どこにも送信・保存しません。</p>
+    <h1 data-i18n="title">ナンプレ カメラ解答</h1>
+    <p class="note" data-i18n="note">写真はこの端末の中だけで読み取ります。どこにも送信・保存しません。</p>
 
     <div class="buttons">
-      <label class="button primary">カメラで撮影
+      <label class="button primary"><span data-i18n="camera">カメラで撮影</span>
         <input id="camera" type="file" accept="image/*" capture="environment" hidden>
       </label>
-      <label class="button">写真を選ぶ
+      <label class="button"><span data-i18n="picker">写真を選ぶ</span>
         <input id="picker" type="file" accept="image/*" hidden>
       </label>
     </div>
-    <p class="hint">盤面全体が写るよう、なるべく真上から撮ってください。<br>「カメラで撮影」はスマホ専用です。PCでは「写真を選ぶ」で画像ファイルを読み込めます。</p>
+    <p class="hint"><span data-i18n="hintShoot">盤面全体が写るよう、なるべく真上から撮ってください。</span><br><span data-i18n="hintCamera">「カメラで撮影」はスマホ専用です。PCでは「写真を選ぶ」で画像ファイルを読み込めます。</span></p>
 
     <p id="status" class="status" role="status"></p>
 
     <section id="result" hidden>
-      <div id="grid" class="grid" aria-label="盤面"></div>
+      <div id="grid" class="grid" aria-label="盤面" data-i18n-label="board"></div>
       <p id="legend" class="legend"></p>
 
       <div id="editor" hidden>
         <div class="pad" id="pad"></div>
         <div class="buttons">
-          <button id="solve" class="button primary" type="button">この内容で解く</button>
+          <button id="solve" class="button primary" type="button" data-i18n="solve">この内容で解く</button>
         </div>
       </div>
       <div class="buttons">
-        <button id="edit" class="button" type="button">読み取り結果を直す</button>
+        <button id="edit" class="button" type="button" data-i18n="edit">読み取り結果を直す</button>
       </div>
 
       <details id="preview-box">
-        <summary>読み取った盤面の画像</summary>
+        <summary data-i18n="preview">読み取った盤面の画像</summary>
         <canvas id="preview" width="450" height="450"></canvas>
       </details>
     </section>
 
-    <p class="footer"><a href="#" id="manual">写真を使わず手で入力する</a></p>
+    <p class="footer"><a href="#" id="manual" data-i18n="manual">写真を使わず手で入力する</a></p>
+    <p class="footer"><a href="?lang=en" id="lang-switch" lang="en" data-i18n="otherLanguage">English</a></p>
   </main>
   <script type="module" src="app.js"></script>
 </body>

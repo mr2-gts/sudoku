@@ -15,12 +15,15 @@ python -m unittest test_sudoku_solver test_sudoku_image  # テスト
 
 `docs/` はスマホのブラウザで開くWebページ。「カメラで撮影」で撮った写真をその場で読み取り、解答を表示する（黒=問題の数字、青=答え）。写真はブラウザの中だけで処理し、どこにも送信・保存しない。読み取りを誤ったときは、マスをタップして直してから解き直せる。写真を使わず手で入力することもできる。「カメラで撮影」はスマホ専用（PCのブラウザはこの撮影の仕組みに対応しておらず、ファイル選択になる）。PCでは「写真を選ぶ」で画像ファイルを読み込める。
 
+表示言語はブラウザの言語設定で決まる。第一言語が日本語なら日本語、それ以外は英語で表示する。ページ下部のリンクで切り替えられる（URL に `?lang=ja` / `?lang=en` を付けて開くのと同じで、選んだ言語は記憶しない）。
+
 公開手順（GitHub Pages、最初に1回だけ）: リポジトリの Settings → Pages → Build and deployment で Source を「Deploy from a branch」、Branch を `main` / `/docs` にして Save。数分後に `https://mr2-gts.github.io/sudoku/` で開ける。
 
 | ファイル | 役割 |
 |---|---|
 | `docs/index.html` `docs/style.css` | 画面 |
 | `docs/app.js` | 画面の操作（写真の読み込み → 読み取り → 解く → 表示、修正） |
+| `docs/i18n.js` | 表示言語の判定と、日本語・英語の文言 |
 | `docs/vision.js` | `sudoku_image.py` の読み取り処理の移植。OpenCV は使わず、必要な画像処理を自前で実装（ページが軽く、外部サービスに依存しない）。|
 | `docs/solver.js` | `sudoku_solver.py` の移植 |
 | `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 640KB） |
