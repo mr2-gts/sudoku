@@ -56,6 +56,7 @@ async function onPhoto(event) {
   const file = event.target.files[0];
   event.target.value = ""; // 同じ写真を選び直せるようにし、参照も残さない
   if (!file) return;
+  $("result").hidden = true; // 前の問題の盤面と答えを、読み取り中や読み取りに失敗したときに見せない
   setStatus(t("reading"));
   await new Promise((r) => setTimeout(r, 30)); // 表示を更新してから重い処理に入る
   try {
