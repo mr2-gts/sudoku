@@ -32,6 +32,15 @@
     </div>
     <p class="hint"><span data-i18n="hintShoot">盤面全体が写るよう、なるべく真上から撮ってください。</span><br><span data-i18n="hintCamera">「カメラで撮影」はスマホ専用です。PCでは「写真を選ぶ」で画像ファイルを読み込めます。</span></p>
 
+    <!-- ページ内カメラ（Android のみ。理由は app.js を参照） -->
+    <div id="camera-view" class="camera-view" hidden>
+      <video id="camera-video" autoplay playsinline muted></video>
+      <div class="buttons">
+        <button id="camera-cancel" class="button" type="button" data-i18n="cancel">やめる</button>
+        <button id="shutter" class="button primary" type="button" data-i18n="shutter">撮影</button>
+      </div>
+    </div>
+
     <p id="status" class="status" role="status"></p>
 
     <section id="result" hidden>
