@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- GitHub Pages はレスポンスヘッダーを設定できないため、CSP は meta で指定する。
+       通信先を同じサイトだけに限り（connect-src）、写真を外部へ送る処理が紛れ込んでもブラウザが止めるようにする。
+       X-Frame-Options・X-Content-Type-Options・frame-ancestors は meta では指定できないため付けていない。
+       ログインなど悪用される操作がなく、利用者のファイルを配信することもないので影響は小さい。
+       ヘッダーを設定できる配信先に移したら、これらもヘッダーで付ける。 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>ナンプレ カメラ解答</title>
   <!-- 英語表示のときに日本語が見える時間を短くするため、文言の差し替えを先に読み込む。
        module は描画を止めないので、回線が遅いと日本語が一瞬見えることはある。確実に防ぐには差し替えが終わるまで
