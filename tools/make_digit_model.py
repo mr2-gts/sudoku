@@ -51,11 +51,14 @@ def render(font_path: str, digit: int, rng: random.Random) -> np.ndarray:
     return a
 
 
-def drop_inconsistent(feats: np.ndarray, labels: np.ndarray, k: int = 5) -> np.ndarray:
-    """似ている見本 k 件の多数決（DigitClassifier と同じ判定）がラベルと食い違う見本を見つける（ENN）。
+def drop_inconsistent(feats: np.ndarray, labels: np.ndarray, k: int = 5, min_sim: float = 0.95) -> np.ndarray:
+    """別の数字と同じ形になってしまった見本を見つける。
 
     細い書体を小さく描いて細らせると、4 の斜め線と横線が消えて縦棒だけ残るなど、
     別の数字と同じ形の見本ができる。そのまま残すと、きれいな 1 を 4 と読み間違える原因になる。
+    似ている見本 k 件の多数決（DigitClassifier と同じ判定）がラベルと食い違い（ENN）、しかも
+    別の数字の見本とほぼ同じ形（類似度 min_sim 以上）の見本だけを除く。食い違うだけの見本まで除くと、
+    改善は同じまま、際どいマスの票が動いて読み間違えるマスが増えた（合成画像 216 枚で 1 → 5 マス）。
     戻り値は残す見本を True とする配列。
     """
     f = feats.astype(np.float32)
@@ -63,7 +66,8 @@ def drop_inconsistent(feats: np.ndarray, labels: np.ndarray, k: int = 5) -> np.n
     np.fill_diagonal(sims, -np.inf)  # 自分自身は数えない
     nearest = labels[np.argsort(sims, axis=1)[:, -k:]]
     votes = np.apply_along_axis(np.bincount, 1, nearest, minlength=10)
-    return votes.argmax(axis=1) == labels
+    other = np.where(labels[:, None] != labels[None, :], sims, -np.inf).max(axis=1)  # 別の数字の見本との最大類似度
+    return (votes.argmax(axis=1) == labels) | (other < min_sim)
 
 
 def main(fonts):
@@ -81,7 +85,7 @@ def main(fonts):
     feats, labels = np.array(feats, np.float16), np.array(labels, np.uint8)
     keep = drop_inconsistent(feats, labels)
     np.savez_compressed(OUT, features=feats[keep], labels=labels[keep])
-    print(f"{OUT} に {keep.sum()} 件の見本を保存しました（ラベルと形が食い違う {(~keep).sum()} 件を除外）")
+    print(f"{OUT} に {keep.sum()} 件の見本を保存しました（別の数字と同じ形の {(~keep).sum()} 件を除外）")
 
 
 if __name__ == "__main__":

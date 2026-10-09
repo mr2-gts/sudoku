@@ -26,7 +26,7 @@ python -m unittest test_sudoku_solver test_sudoku_image  # テスト
 | `docs/i18n.js` | 表示言語の判定と、日本語・英語の文言 |
 | `docs/vision.js` | `sudoku_image.py` の読み取り処理の移植。OpenCV は使わず、必要な画像処理を自前で実装（ページが軽く、外部サービスに依存しない）。|
 | `docs/solver.js` | `sudoku_solver.py` の移植 |
-| `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 620KB） |
+| `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 640KB） |
 
 大きな写真は長辺 1200 ピクセルに縮小してから読み取る。テスト画像 12 枚すべてで Python 版と同じく正しく読み取れることを確認した（1枚 0.5 秒前後、PC の Chromium）。`node --test test_web_solver.mjs` でソルバーのテストを実行できる。手元で試すときは `python -m http.server -d docs` などで配信して開く（ファイルを直接開くと見本データを読み込めない）。
 
