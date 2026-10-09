@@ -38,8 +38,9 @@ const classifierPromise = (async () => {
 // ---------------------------------------------------------------------------
 // 写真の読み込みと読み取り
 // ---------------------------------------------------------------------------
-async function loadGray(file) {
-  const bitmap = await createImageBitmap(file); // 写真の向き（EXIF）はブラウザが補正する
+// source は写真のファイル、またはページ内カメラで撮った1コマ（OffscreenCanvas）
+async function loadGray(source) {
+  const bitmap = await createImageBitmap(source); // 写真の向き（EXIF）はブラウザが補正する
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
   const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
   const canvas = new OffscreenCanvas(w, h);
@@ -57,12 +58,15 @@ async function loadGray(file) {
 async function onPhoto(event) {
   const file = event.target.files[0];
   event.target.value = ""; // 同じ写真を選び直せるようにし、参照も残さない
-  if (!file) return;
+  if (file) await readPhoto(file);
+}
+
+async function readPhoto(source) {
   $("result").hidden = true; // 前の問題の盤面と答えを、読み取り中や読み取りに失敗したときに見せない
   setStatus(t("reading"));
   await new Promise((r) => setTimeout(r, 30)); // 表示を更新してから重い処理に入る
   try {
-    const [gray, classifier] = await Promise.all([loadGray(file), classifierPromise]);
+    const [gray, classifier] = await Promise.all([loadGray(source), classifierPromise]);
     const reading = readPuzzle(gray, classifier);
     state.puzzle = reading.grid;
     state.confidence = reading.confidence;
@@ -80,6 +84,58 @@ function drawPreview(board) {
   board.data.forEach((v, i) => img.data.set([v, v, v, 255], i * 4));
   ctx.putImageData(img, 0, 0);
   $("preview-box").hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// ページ内カメラ（Android のみ）
+// ---------------------------------------------------------------------------
+// Android の Chrome は、撮影のためにカメラアプリを起動している間にメモリ不足で強制終了されることがある。
+// そうなると、戻ったときに「メモリ不足のため前の操作を完了できませんでした」と出て、写真がページに届かない。
+// そこで Android ではカメラアプリを使わず、ページの中にカメラの映像を出して撮る。
+// iPhone と PC ではこの問題が起きないため、これまでどおりカメラアプリ（PC はファイル選択）を使う。
+let useCameraApp = !/Android/i.test(navigator.userAgent) || !navigator.mediaDevices?.getUserMedia;
+let cameraStream = null;
+let cameraOpening = false;
+
+async function openCamera(event) {
+  if (useCameraApp) return; // input 本来の動作でカメラアプリを開く
+  event.preventDefault();
+  if (cameraOpening) return; // カメラが起動するのを待っている間に、もう一度押されたとき
+  cameraOpening = true;
+  try {
+    // 読み取りは長辺 MAX_SIDE まで縮小するので、映像の大きさはこの程度で足りる
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1920 } },
+    });
+  } catch (e) {
+    // カメラの使用を許可されなかったときなど。これ以降はカメラアプリで撮る
+    console.error(e);
+    useCameraApp = true;
+    setStatus(t("cameraFallback"), true);
+    $("camera").click(); // ボタンを押してから時間がたっていると、ブラウザに止められて開かない（そのときは案内のとおり押し直してもらう）
+    return;
+  } finally {
+    cameraOpening = false;
+  }
+  $("camera-video").srcObject = cameraStream;
+  $("camera-view").hidden = false;
+}
+
+function closeCamera() {
+  cameraStream?.getTracks().forEach((track) => track.stop());
+  cameraStream = null;
+  $("camera-video").srcObject = null;
+  $("camera-view").hidden = true;
+}
+
+function takeShot() {
+  const video = $("camera-video");
+  if (video.readyState < video.HAVE_CURRENT_DATA) return; // 映像がまだ届いていない
+  // カメラを止める前に、今のコマを写し取っておく
+  const frame = new OffscreenCanvas(video.videoWidth, video.videoHeight);
+  frame.getContext("2d").drawImage(video, 0, 0);
+  closeCamera();
+  readPhoto(frame);
 }
 
 // ---------------------------------------------------------------------------
@@ -181,8 +237,11 @@ for (const d of [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]) {
   b.addEventListener("click", () => inputDigit(d));
   $("pad").append(b);
 }
+$("camera").addEventListener("click", openCamera);
 $("camera").addEventListener("change", onPhoto);
 $("picker").addEventListener("change", onPhoto);
+$("shutter").addEventListener("click", takeShot);
+$("camera-cancel").addEventListener("click", closeCamera);
 $("solve").addEventListener("click", solveAndShow);
 $("edit").addEventListener("click", () => {
   setEditing(true);

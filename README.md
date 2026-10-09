@@ -15,6 +15,8 @@ python -m unittest test_sudoku_solver test_sudoku_image  # テスト
 
 `docs/` はスマホのブラウザで開くWebページ。「カメラで撮影」で撮った写真をその場で読み取り、解答を表示する（黒=問題の数字、青=答え）。写真はブラウザの中だけで処理し、どこにも送信・保存しない。読み取りを誤ったときは、マスをタップして直してから解き直せる。写真を使わず手で入力することもできる。「カメラで撮影」はスマホ専用（PCのブラウザはこの撮影の仕組みに対応しておらず、ファイル選択になる）。PCでは「写真を選ぶ」で画像ファイルを読み込める。
 
+Android では「カメラで撮影」を押すと、カメラアプリを起動せず、ページの中にカメラの映像を出して撮る。カメラアプリを起動している間に Chrome がメモリ不足で強制終了され、戻ったときに「メモリ不足のため前の操作を完了できませんでした」と出て写真が届かないことがあるため。最初はカメラの使用許可を求められる。許可しなかったときなど、ページ内でカメラを使えないときはカメラアプリで撮る。iPhone と PC はこの問題が起きないため、これまでどおり（iPhone はカメラアプリ、PC はファイル選択）。
+
 表示言語はブラウザの言語設定で決まる。第一言語が日本語なら日本語、それ以外は英語で表示する。ページ下部のリンクで切り替えられる（URL に `?lang=ja` / `?lang=en` を付けて開くのと同じで、選んだ言語は記憶しない）。
 
 公開手順（GitHub Pages、最初に1回だけ）: リポジトリの Settings → Pages → Build and deployment で Source を「Deploy from a branch」、Branch を `main` / `/docs` にして Save。数分後に `https://mr2-gts.github.io/sudoku/` で開ける。
@@ -22,13 +24,13 @@ python -m unittest test_sudoku_solver test_sudoku_image  # テスト
 | ファイル | 役割 |
 |---|---|
 | `docs/index.html` `docs/style.css` | 画面 |
-| `docs/app.js` | 画面の操作（写真の読み込み → 読み取り → 解く → 表示、修正） |
+| `docs/app.js` | 画面の操作（写真の読み込み・ページ内カメラ → 読み取り → 解く → 表示、修正） |
 | `docs/i18n.js` | 表示言語の判定と、日本語・英語の文言 |
 | `docs/vision.js` | `sudoku_image.py` の読み取り処理の移植。OpenCV は使わず、必要な画像処理を自前で実装（ページが軽く、外部サービスに依存しない）。|
 | `docs/solver.js` | `sudoku_solver.py` の移植 |
 | `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 640KB） |
 
-大きな写真は長辺 1200 ピクセルに縮小してから読み取る。テスト画像 12 枚すべてで Python 版と同じく正しく読み取れることを確認した（1枚 0.5 秒前後、PC の Chromium）。`node --test test_web_solver.mjs` でソルバーのテストを実行できる。手元で試すときは `python -m http.server -d docs` などで配信して開く（ファイルを直接開くと見本データを読み込めない）。
+大きな写真は長辺 1200 ピクセルに縮小してから読み取る（ページ内カメラは 1920 ピクセル程度の映像を求め、撮った1コマを同じように縮小する）。テスト画像 12 枚すべてで Python 版と同じく正しく読み取れることを確認した（1枚 0.5 秒前後、PC の Chromium）。`node --test test_web_solver.mjs` でソルバーのテストを実行できる。手元で試すときは `python -m http.server -d docs` などで配信して開く（ファイルを直接開くと見本データを読み込めない）。
 
 ## 入力形式
 
