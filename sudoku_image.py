@@ -225,7 +225,7 @@ def main(argv: list[str]) -> int:
 
     print("読み取った問題:")
     print(format_grid(reading.grid))
-    unsure = [i for i, p in enumerate(reading.confidence) if p < 0.6]
+    unsure = [i for i, p in enumerate(reading.confidence) if p < 0.8]  # 5票中3票以下（3票でも3割以上が誤読だった）
     if unsure:
         cells = "、".join(f"{i // 9 + 1}行{i % 9 + 1}列" for i in unsure)
         print(f"\n※ 読み取りが不確かなマス: {cells}")

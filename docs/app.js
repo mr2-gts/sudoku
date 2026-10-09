@@ -6,7 +6,9 @@ import { SudokuError, solve } from "./solver.js";
 import { t } from "./i18n.js";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）
-const UNSURE = 0.6; // 確からしさがこれ未満のマスを「不確か」として色を付ける
+// 確からしさ（近い見本5件のうち同じ数字の割合）がこれ未満のマスを「不確か」として色を付ける。
+// 5票中3票（0.6）でも、合成画像では3割以上が誤読だったため、4票未満を不確かとする（Python 版と同じ）。
+const UNSURE = 0.8;
 
 const $ = (id) => document.getElementById(id);
 const state = {
