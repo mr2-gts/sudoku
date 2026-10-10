@@ -119,6 +119,7 @@ async function openCamera(event) {
   }
   $("camera-video").srcObject = cameraStream;
   $("camera-view").hidden = false;
+  history.pushState({ camera: true }, ""); // スマホの「戻る」でページを離れず、カメラを閉じるようにする
 }
 
 function closeCamera() {
@@ -126,6 +127,8 @@ function closeCamera() {
   cameraStream = null;
   $("camera-video").srcObject = null;
   $("camera-view").hidden = true;
+  // 開いたときに足した履歴を戻す（「戻る」で閉じたときは、すでに戻っている）
+  if (history.state?.camera) history.back();
 }
 
 function takeShot() {
@@ -242,6 +245,7 @@ $("camera").addEventListener("change", onPhoto);
 $("picker").addEventListener("change", onPhoto);
 $("shutter").addEventListener("click", takeShot);
 $("camera-cancel").addEventListener("click", closeCamera);
+window.addEventListener("popstate", closeCamera);
 $("solve").addEventListener("click", solveAndShow);
 $("edit").addEventListener("click", () => {
   setEditing(true);
