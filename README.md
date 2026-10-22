@@ -23,6 +23,8 @@ Android では「カメラで撮影」を押すと、カメラアプリを起動
 
 公開手順（GitHub Pages、最初に1回だけ）: リポジトリの Settings → Pages → Build and deployment で Source を「Deploy from a branch」、Branch を `main` / `/docs` にして Save。数分後に `https://mr2-gts.github.io/sudoku/` で開ける。
 
+`docs/` のファイルを変えたら、公開（`main` へのマージ）の前に `python tools/stamp_web_versions.py` を実行する。ページが読み込むファイルの URL に、中身から決めた版（`app.js?v=1a2b3c4d`）を付け直すツール。GitHub Pages はブラウザにファイルを 10 分間キャッシュさせるが、それより長く古いファイルが使われることがあり、新旧が混ざるとモジュールの読み込みでエラーになってページの処理がまったく動かなくなる（実際にスマホで起きた。古い `solver.js` に、新しい `steps.js` が読み込む `PEERS` がなかった）。中身が変わったファイルは URL も変わるので、ブラウザは必ず新しいファイルを取りに行く。付け忘れは `node --test test_web_solver.mjs` で検出する。それでも処理が動かなかったときは、`docs/load-check.js` が理由とサイトのデータの消去方法を画面に表示する。
+
 | ファイル | 役割 |
 |---|---|
 | `docs/index.html` `docs/style.css` | 画面 |
@@ -31,6 +33,7 @@ Android では「カメラで撮影」を押すと、カメラアプリを起動
 | `docs/vision.js` | `sudoku_image.py` の読み取り処理の移植。OpenCV は使わず、必要な画像処理を自前で実装（ページが軽く、外部サービスに依存しない）。|
 | `docs/solver.js` | `sudoku_solver.py` の移植 |
 | `docs/steps.js` | 解き方の解説の手順（人の手筋で1手ずつ数字を置いたり候補を消したりする順番と、その理由）。Web 版だけの機能 |
+| `docs/load-check.js` | ページの処理が動かなかったとき（古いファイルが残って新旧が混ざったときなど）に、理由と直し方を表示する |
 | `docs/digit_model.bin.gz` | 見本データ（`digit_model.npz` を `tools/export_web_model.py` で変換したもの、約 640KB） |
 
 大きな写真は長辺 1200 ピクセルに縮小してから読み取る（ページ内カメラは 1920 ピクセル程度の映像を求め、撮った1コマを同じように縮小する）。テスト画像 12 枚すべてで Python 版と同じく正しく読み取れることを確認した（1枚 0.5 秒前後、PC の Chromium）。`node --test test_web_solver.mjs` でソルバーと解説の手順のテストを実行できる。手元で試すときは `python -m http.server -d docs` などで配信して開く（ファイルを直接開くと見本データを読み込めない）。
