@@ -1,6 +1,7 @@
-// Web版（docs/solver.js・docs/steps.js）のテスト。node --test で実行する（Node.js 18 以上）。
+// Web版（docs/）のテスト。node --test で実行する（Node.js 18 以上）。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 import { PEERS, SudokuError, parse, solve } from "./docs/solver.js";
@@ -170,4 +171,21 @@ test("解説の手順: ヒドゥンシングルがなければネイキッドシ
   assert.equal(step.cell, 0);
   assert.equal(step.digit, 9);
   assert.deepEqual(step.seen, { row: [1, 2, 3], col: [4, 5, 6], box: [7, 8] });
+});
+
+// ページが読み込むファイルの URL の版（?v=）は、そのファイルの中身の SHA-256 の先頭 8 桁（tools/stamp_web_versions.py が付ける）。
+// docs/ のファイルを変えて版を付け直し忘れると、ブラウザが古いファイルを使い続け、新旧が混ざってページが動かなくなる
+test("docs/ が読み込むファイルの版が、そのファイルの中身と一致する", () => {
+  const docs = new URL("docs/", import.meta.url);
+  const ref = /(["'])(\.\/)?([\w.-]+\.(?:js|css|gz))(?:\?v=([0-9a-f]+))?\1/g; // tools/stamp_web_versions.py の REF と同じ
+  let count = 0;
+  for (const name of readdirSync(docs).filter((n) => /\.(html|js)$/.test(n))) {
+    for (const [, , , target, v] of readFileSync(new URL(name, docs), "utf8").matchAll(ref)) {
+      if (!existsSync(new URL(target, docs))) continue;
+      const expected = createHash("sha256").update(readFileSync(new URL(target, docs))).digest("hex").slice(0, 8);
+      assert.equal(v, expected, `${name} が読み込む ${target} の版が古い（python tools/stamp_web_versions.py を実行する）`);
+      count++;
+    }
+  }
+  assert.ok(count >= 10); // 読み込みの書き方が変わって見つけられなくなっていないか
 });

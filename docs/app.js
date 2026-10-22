@@ -1,10 +1,10 @@
 // 画面の操作（写真の読み込み → 読み取り → 解く → 表示、読み取り結果の修正、解き方の解説）
 // 写真はこのページの中（メモリ上）だけで扱い、送信も保存もしない。
 
-import { DigitClassifier, readPuzzle } from "./vision.js";
-import { SudokuError, solve } from "./solver.js";
-import { solveSteps } from "./steps.js";
-import { t } from "./i18n.js";
+import { DigitClassifier, readPuzzle } from "./vision.js?v=e21ac435";
+import { SudokuError, solve } from "./solver.js?v=af66d12c";
+import { solveSteps } from "./steps.js?v=e6e2488c";
+import { t } from "./i18n.js?v=36940c4c";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）
 // 確からしさ（近い見本5件のうち同じ数字の割合）がこれ未満のマスを「不確か」として色を付ける。
@@ -28,7 +28,7 @@ const state = {
 // 見本データの読み込み（ページを開いたときに始める）
 // ---------------------------------------------------------------------------
 const classifierPromise = (async () => {
-  const res = await fetch("digit_model.bin.gz");
+  const res = await fetch("digit_model.bin.gz?v=27beffbe");
   if (!res.ok) throw new Error(t("modelError", { status: res.status }));
   let buf = await res.arrayBuffer();
   const head = new Uint8Array(buf, 0, 2);
@@ -446,3 +446,5 @@ $("manual").addEventListener("click", (e) => {
   renderGrid();
 });
 classifierPromise.catch((e) => setStatus(e.message, true));
+// ページの処理が最後まで動いたことを load-check.js に知らせる（印がなければ、読み込みの失敗として案内を出す）
+document.documentElement.dataset.ready = "true";

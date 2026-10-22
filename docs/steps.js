@@ -11,7 +11,7 @@
 //    - X-Wing … 2つの行（列）で、ある数字が入りうるマスがそれぞれ2つだけで、それが同じ2つの列（行）に並ぶ
 // 3. どれも見つからないときは、答えから1マス埋めて続ける（理由は示せない）。
 
-import { PEERS, UNITS } from "./solver.js";
+import { PEERS, UNITS } from "./solver.js?v=af66d12c";
 
 const UNIT_KINDS = ["row", "col", "box"]; // UNITS は行9・列9・ブロック9の順
 // ブロックを先に調べる（人がまず探すのはブロックの中であることが多いため）
