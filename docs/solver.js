@@ -14,7 +14,7 @@ for (let b = 0; b < 9; b++) {
   const br = Math.floor(b / 3) * 3, bc = (b % 3) * 3;
   UNITS.push([...Array(9)].map((_, i) => (br + Math.floor(i / 3)) * 9 + bc + (i % 3)));
 }
-const PEERS = [...Array(81)].map((_, i) => {
+export const PEERS = [...Array(81)].map((_, i) => {
   const s = new Set();
   for (const u of UNITS) if (u.includes(i)) u.forEach((p) => s.add(p));
   s.delete(i);

@@ -11,6 +11,11 @@
   --button: #f0f0f0;
   --primary: #1565c0;
   --error: #c62828;
+  --area: #e6edf5;
+  --current: #b9d6ff;
+  --blocker: #ffd8a0;
+  --removed: #f2d0d0;
+  --guessed: #8e24aa;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +31,11 @@
     --button: #2a2a2a;
     --primary: #1e88e5;
     --error: #ef5350;
+    --area: #1f2833;
+    --current: #1e3a5f;
+    --blocker: #6b4500;
+    --removed: #432020;
+    --guessed: #ce93d8;
   }
 }
 
@@ -85,6 +95,42 @@ h1 { font-size: 1.4rem; margin: 0 0 8px; }
 .cell.unsure { background: var(--unsure); }
 .editing .cell { cursor: pointer; }
 .cell.selected { background: var(--selected); }
+/* 解説モード: 理由に関係するユニット、理由になる数字、手筋の形をつくるマス、今回置いたマス、候補を消したマス、
+   置けないマス（×）、答えから置いた数字 */
+.cell.area { background: var(--area); }
+.cell.blocker { background: var(--blocker); }
+.cell.pattern { background: var(--current); }
+.cell.current { background: var(--current); box-shadow: inset 0 0 0 3px var(--primary); }
+.cell.changed { box-shadow: inset 0 0 0 2px var(--error); }
+.cell.excluded { color: var(--muted); }
+.cell.guessed { color: var(--guessed); }
+/* 候補（小さい数字を 3x3 に並べる）。消した候補は赤、手筋の形をつくる候補は青で示す */
+.cell.candidates {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 1px;
+  font-size: min(2.6vw, 12px);
+  color: var(--muted);
+}
+.cell.candidates span { display: flex; align-items: center; justify-content: center; line-height: 1; }
+/* 消した候補は、薄い赤の地に赤い斜線を重ねる。取り消し線は小さい文字では細くて見えにくく、
+   太くしても 8 や 3 の横画と重なって紛れるため。数字まで赤くすると斜線と重なって読みにくいので、数字は通常の色にする */
+.cell .removed {
+  color: var(--fg);
+  font-weight: bold;
+  border-radius: 2px;
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1.5px), var(--error) calc(50% - 1.5px), var(--error) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    var(--removed);
+}
+.cell .key { color: var(--filled); font-weight: bold; }
+
+.button:disabled { opacity: 0.4; cursor: default; }
+.step-count { align-self: center; min-width: 4.5em; text-align: center; font-variant-numeric: tabular-nums; }
+.reason { padding: 12px; border-radius: 10px; background: var(--button); line-height: 1.6; }
+.reason p { margin: 0; }
+.reason-name { font-weight: bold; }
 
 .pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 12px; }
 .pad button {
