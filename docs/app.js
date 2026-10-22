@@ -20,7 +20,8 @@ const state = {
   selected: -1,
   steps: [], // 解説モードの手順（solveSteps の結果）
   step: -1, // 解説モードで表示中の位置（0=最初の盤面、k=k手目まで置いた盤面）。解説モードでないときは -1
-  showReason: false, // 解説モードで、今の手を置ける理由を表示するか
+  showReason: false, // 解説モードで、今の手の理由を表示するか
+  candidatesFrom: -1, // 解説モードで、初めて候補を消す手の番号（state.steps の添え字。なければ -1）
 };
 
 // ---------------------------------------------------------------------------
@@ -241,24 +242,31 @@ function setStatus(text, isError = false) {
 }
 
 // ---------------------------------------------------------------------------
-// 解説モード（最初の盤面から、手筋で1手ずつ数字を置いていく）
+// 解説モード（最初の盤面から、手筋で1手ずつ数字を置いたり候補を消したりしていく）
 // ---------------------------------------------------------------------------
-// 行・列・ブロックの名前、そのユニットのほかのマスに数字を置けない理由になる残り2種類の名前、そこにある数字の書き方
+// 行・列・ブロックの名前（単数・複数）、そのユニットのほかのマスに数字を置けない理由になる残り2種類の名前、そこにある数字の書き方
 const UNIT_TEXT = {
-  row: { unit: "unitRow", others: "othersRow", seen: "seenRow" },
-  col: { unit: "unitCol", others: "othersCol", seen: "seenCol" },
-  box: { unit: "unitBox", others: "othersBox", seen: "seenBox" },
+  row: { unit: "unitRow", units: "unitsRow", others: "othersRow", seen: "seenRow" },
+  col: { unit: "unitCol", units: "unitsCol", others: "othersCol", seen: "seenCol" },
+  box: { unit: "unitBox", units: "unitsBox", others: "othersBox", seen: "seenBox" },
 };
 
 function startExplain() {
   state.steps = solveSteps(state.puzzle, state.solution);
   state.step = 0;
   state.showReason = false;
+  state.candidatesFrom = state.steps.findIndex((s) => s.removed);
   $("explain-start").hidden = true;
   $("edit").hidden = true;
   $("explain").hidden = false;
   const guessed = state.steps.some((s) => s.technique === "answer");
-  $("legend").textContent = [t("legendExplain"), guessed ? t("legendGuessed") : ""].join(" ");
+  $("legend").textContent = [
+    t("legendExplain"),
+    guessed ? t("legendGuessed") : "",
+    state.candidatesFrom >= 0 ? t("legendCandidates") : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   renderExplain();
 }
 
@@ -282,53 +290,112 @@ function renderExplain() {
   $("step-next").textContent = next?.technique === "answer" ? t("stepAnswer") : t("stepNext");
   $("step-note").textContent = [
     state.step === 0 ? t("explainIntro") : "",
+    step?.removed ? t("eliminateNote", { name: techniqueName(step) }) : "",
+    state.step === state.candidatesFrom ? t("candidatesNext") : "",
     !next ? t("explainDone") : next.technique === "answer" ? t("explainStuck") : "",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
   $("reason").textContent = state.showReason ? t("reasonHide") : t("reasonShow");
-  $("reason-text").hidden = !(state.showReason && step);
+  $("reason-box").hidden = !(state.showReason && step);
+  const name = step ? techniqueName(step) : "";
+  $("reason-name").textContent = name;
+  $("reason-name").hidden = !name;
   $("reason-text").textContent = step ? reasonText(step) : "";
   renderGrid();
 }
 
+const TECHNIQUE_NAMES = {
+  hiddenSingle: "techHiddenSingle",
+  nakedSingle: "techNakedSingle",
+  lockedCandidates: "techLockedCandidates",
+  xWing: "techXWing",
+};
+
+// 手筋の名前（答えから置いた手は名前なし）
+function techniqueName(step) {
+  if (step.technique === "answer") return "";
+  if (step.technique === "hiddenSingle" && !step.excluded.length) return t("techFullHouse");
+  if (step.technique === "nakedSubset") return t(step.cells.length === 2 ? "techNakedPair" : "techNakedTriple");
+  if (step.technique === "hiddenSubset") return t(step.cells.length === 2 ? "techHiddenPair" : "techHiddenTriple");
+  return t(TECHNIQUE_NAMES[step.technique]);
+}
+
 function reasonText(step) {
-  const digit = step.digit;
+  const list = (digits) => digits.join(t("digitSep"));
   if (step.technique === "hiddenSingle") {
     const keys = UNIT_TEXT[step.unitKind];
-    // ほかに空きマスがなければ、ユニットで最後に残った1マス
-    return t(step.excluded.length ? "hiddenSingle" : "fullHouse", { unit: t(keys.unit), others: t(keys.others), digit });
+    // ほかに空きマスがなければ、ユニットで最後に残った1マス。ほかの空きマスに置けない理由は、
+    // 同じ行・列・ブロックにある数字（blockers）と、先の手で消した候補（erased）のどちらか、または両方
+    const key = !step.excluded.length
+      ? "fullHouse"
+      : !step.erased.length
+        ? "hiddenSingle"
+        : step.blockers.length
+          ? "hiddenSingleErased"
+          : "hiddenSingleAllErased";
+    return t(key, { unit: t(keys.unit), others: t(keys.others), digit: step.digit });
   }
   if (step.technique === "nakedSingle") {
     const seen = Object.entries(step.seen)
       .filter(([, digits]) => digits.length)
-      .map(([kind, digits]) => t(UNIT_TEXT[kind].seen, { digits: digits.join(t("digitSep")) }))
+      .map(([kind, digits]) => t(UNIT_TEXT[kind].seen, { digits: list(digits) }))
       .join(t("seenSep"));
-    return t("nakedSingle", { digit, seen });
+    return t(step.erased.length ? "nakedSingleErased" : "nakedSingle", { digit: step.digit, seen, erased: list(step.erased) });
+  }
+  if (step.technique === "lockedCandidates") {
+    return t("lockedCandidates", { base: t(UNIT_TEXT[step.baseKind].unit), cover: t(UNIT_TEXT[step.coverKind].unit), digit: step.digits[0] });
+  }
+  if (step.technique === "nakedSubset" || step.technique === "hiddenSubset") {
+    return t(step.technique, { unit: t(UNIT_TEXT[step.unitKind].unit), count: step.cells.length, digits: list(step.digits) });
+  }
+  if (step.technique === "xWing") {
+    return t("xWing", { bases: t(UNIT_TEXT[step.baseKind].units), covers: t(UNIT_TEXT[step.coverKind].units), digit: step.digits[0] });
   }
   return t("answerStep");
 }
 
-// state.step 手目までを置いた盤面を表示し、その手のマスを強調する。理由の表示中は、理由に関係するマスにも色を付ける
+// state.step 手目までを進めた盤面を表示し、その手のマスや消した候補を強調する。理由の表示中は、理由に関係するマスにも色を付ける
 function renderExplainGrid() {
   const board = state.puzzle.slice();
   const guessed = new Set(); // 答えから置いたマス
   for (const s of state.steps.slice(0, state.step)) {
+    if (s.removed) continue;
     board[s.cell] = s.digit;
     if (s.technique === "answer") guessed.add(s.cell);
   }
   const step = state.steps[state.step - 1];
+  // 候補は、初めて候補を消す手から先で表示する（その後のシングルも、消した候補を理由にすることがあるため）
+  const showCandidates = state.candidatesFrom >= 0 && state.step > state.candidatesFrom;
+  const removed = new Map(step?.removed?.map((r) => [r.cell, r.digits])); // この手で消した候補
   const reason = state.showReason && step ? step : {};
   const area = new Set(reason.area), blockers = new Set(reason.blockers), excluded = new Set(reason.excluded);
+  const pattern = new Set(reason.removed ? reason.cells : []); // 手筋の形をつくるマス
   $("grid").replaceChildren(
     ...board.map((d, i) => {
       const cell = document.createElement("div");
       cell.className = "cell";
-      cell.textContent = d || (excluded.has(i) ? "×" : "");
-      if (state.puzzle[i]) cell.classList.add("given");
-      else if (guessed.has(i)) cell.classList.add("guessed");
-      else if (d) cell.classList.add("filled");
-      else if (excluded.has(i)) cell.classList.add("excluded");
+      if (d) {
+        cell.textContent = d;
+        cell.classList.add(state.puzzle[i] ? "given" : guessed.has(i) ? "guessed" : "filled");
+      } else if (excluded.has(i)) {
+        cell.textContent = "×";
+        cell.classList.add("excluded");
+      } else if (showCandidates) {
+        cell.classList.add("candidates");
+        const gone = removed.get(i) ?? [];
+        for (let x = 1; x <= 9; x++) {
+          const mark = document.createElement("span");
+          if (step.cand[i] & (1 << (x - 1)) || gone.includes(x)) mark.textContent = x;
+          if (gone.includes(x)) mark.className = "removed";
+          else if (pattern.has(i) && reason.digits.includes(x)) mark.className = "key";
+          cell.append(mark);
+        }
+      }
       if (area.has(i)) cell.classList.add("area");
       if (blockers.has(i)) cell.classList.add("blocker");
+      if (pattern.has(i)) cell.classList.add("pattern");
+      if (removed.has(i)) cell.classList.add("changed");
       if (i === step?.cell) cell.classList.add("current");
       return cell;
     }),

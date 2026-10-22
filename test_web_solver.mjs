@@ -36,30 +36,82 @@ test("同じ行に同じ数字があればエラー", () => {
   assert.throws(() => solve(grid), SudokuError);
 });
 
-// 解説モードの手順を最後まで進め、各手の数字が答えと同じで、示した理由が正しいことを確かめる
+// 解説モードの手順を最後まで進め、各手が正しいこと（置く数字が答えと同じ、消す候補が答えでない、示した理由が成り立つ）を確かめる
+const bitOf = (d) => 1 << (d - 1);
+const DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const sorted = (a) => [...a].sort((x, y) => x - y);
+
 function checkSteps(grid) {
   const { solution } = solve(grid);
   const steps = solveSteps(grid, solution);
   const board = grid.slice();
+  const erasedSoFar = new Array(81).fill(0); // 先の手で消した候補
+  // 盤面の数字と、これまでに消した候補から求めた、各マスの候補
+  const candidates = () => board.map((d, i) => (d ? 0 : DIGITS.filter((x) => !PEERS[i].some((p) => board[p] === x)).reduce((m, x) => m | bitOf(x), 0) & ~erasedSoFar[i]));
   for (const s of steps) {
-    assert.equal(board[s.cell], 0);
-    assert.equal(s.digit, solution[s.cell]);
-    if (s.technique === "hiddenSingle") {
-      assert.ok(s.area.includes(s.cell));
-      assert.ok(s.area.every((c) => board[c] !== s.digit));
-      assert.deepEqual(s.excluded, s.area.filter((c) => !board[c] && c !== s.cell));
-      // ほかの空きマスはどれも、同じ行・列・ブロックに示したマスの digit がある
-      assert.ok(s.blockers.every((b) => board[b] === s.digit));
-      assert.ok(s.excluded.every((c) => s.blockers.some((b) => PEERS[c].includes(b))));
-    } else if (s.technique === "nakedSingle") {
-      // 同じ行・列・ブロックに、digit 以外の8つの数字がすべてある
-      assert.deepEqual(s.blockers.map((b) => board[b]).sort(), [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((d) => d !== s.digit));
-      assert.ok(s.blockers.every((b) => PEERS[s.cell].includes(b)));
-      assert.deepEqual([...s.seen.row, ...s.seen.col, ...s.seen.box].sort(), s.blockers.map((b) => board[b]).sort());
+    const cand = candidates(); // この手の前の候補
+    if (s.removed) {
+      assert.ok(s.removed.length > 0);
+      for (const { cell, digits } of s.removed) {
+        assert.ok(s.area.includes(cell));
+        for (const d of digits) {
+          assert.ok(cand[cell] & bitOf(d)); // 候補にある数字を消す
+          assert.notEqual(d, solution[cell]); // 答えの数字は消さない
+          erasedSoFar[cell] |= bitOf(d);
+        }
+      }
+      const removedCells = s.removed.map((r) => r.cell);
+      if (s.technique === "nakedSubset") {
+        // cells の候補を合わせると digits だけで、ほかのマスからその数字を消す
+        assert.equal(s.cells.length, s.digits.length);
+        assert.deepEqual(DIGITS.filter((d) => s.cells.some((c) => cand[c] & bitOf(d))), s.digits);
+        assert.ok(removedCells.every((c) => !s.cells.includes(c)));
+        assert.ok(s.removed.every((r) => r.digits.every((d) => s.digits.includes(d))));
+      } else if (s.technique === "hiddenSubset") {
+        // ユニットで digits が入りうるのは cells だけで、cells からほかの候補を消す
+        assert.equal(s.cells.length, s.digits.length);
+        assert.deepEqual(s.area.filter((c) => s.digits.some((d) => cand[c] & bitOf(d))), s.cells);
+        assert.ok(removedCells.every((c) => s.cells.includes(c)));
+        assert.ok(s.removed.every((r) => r.digits.every((d) => !s.digits.includes(d))));
+      } else {
+        assert.ok(["lockedCandidates", "xWing"].includes(s.technique));
+        assert.equal(s.digits.length, 1);
+        assert.ok(s.cells.every((c) => cand[c] & bitOf(s.digits[0])));
+        assert.ok(removedCells.every((c) => !s.cells.includes(c)));
+        if (s.technique === "xWing") {
+          // 4マスが2行・2列に並ぶ
+          assert.equal(s.cells.length, 4);
+          assert.equal(new Set(s.cells.map((c) => Math.floor(c / 9))).size, 2);
+          assert.equal(new Set(s.cells.map((c) => c % 9)).size, 2);
+        }
+      }
     } else {
-      assert.equal(s.technique, "answer");
+      assert.equal(board[s.cell], 0);
+      assert.equal(s.digit, solution[s.cell]);
+      assert.ok(cand[s.cell] & bitOf(s.digit));
+      if (s.technique === "hiddenSingle") {
+        // ユニットで digit が入りうるのはこのマスだけ
+        assert.ok(s.area.includes(s.cell));
+        assert.deepEqual(s.area.filter((c) => cand[c] & bitOf(s.digit)), [s.cell]);
+        assert.deepEqual(s.excluded, s.area.filter((c) => !board[c] && c !== s.cell));
+        // ほかの空きマスは、同じ行・列・ブロックに示したマスの digit があるか、先の手で候補から digit を消している
+        assert.ok(s.blockers.every((b) => board[b] === s.digit));
+        const blocked = s.excluded.filter((c) => s.blockers.some((b) => PEERS[c].includes(b)));
+        assert.deepEqual(s.erased, s.excluded.filter((c) => !blocked.includes(c)));
+        assert.ok(s.erased.every((c) => erasedSoFar[c] & bitOf(s.digit)));
+      } else if (s.technique === "nakedSingle") {
+        // 同じ行・列・ブロックにある数字と、先の手で消した候補で、digit 以外の8つの数字がそろう
+        assert.equal(cand[s.cell], bitOf(s.digit));
+        assert.ok(s.blockers.every((b) => PEERS[s.cell].includes(b)));
+        assert.deepEqual(sorted([...s.seen.row, ...s.seen.col, ...s.seen.box]), sorted(s.blockers.map((b) => board[b])));
+        assert.ok(s.erased.every((d) => erasedSoFar[s.cell] & bitOf(d)));
+        assert.deepEqual(sorted([...s.blockers.map((b) => board[b]), ...s.erased]), DIGITS.filter((d) => d !== s.digit));
+      } else {
+        assert.equal(s.technique, "answer");
+      }
+      board[s.cell] = s.digit;
     }
-    board[s.cell] = s.digit;
+    assert.deepEqual(s.cand, candidates()); // この手の後の候補
   }
   assert.deepEqual(board, solution);
   return steps;
@@ -71,9 +123,30 @@ test("解説の手順: easy はシングルだけで最後まで解ける", () =
   assert.ok(steps.some((s) => s.technique === "hiddenSingle"));
 });
 
-test("解説の手順: hard はシングルで進めないので、答えから置いて続ける", () => {
+test("解説の手順: hard は扱う手筋で進めないので、答えから置いて続ける", () => {
   const steps = checkSteps(parse(readFileSync(new URL("puzzles/hard.txt", import.meta.url), "utf8")));
   assert.equal(steps[0].technique, "answer");
+});
+
+// テスト用に乱数で作った問題（解は一意）。4問で、候補を消す手筋をすべて使う
+const TECHNIQUE_PUZZLES = [
+  "....43.2.4.37....5...2..9.........8..9....3..2.7..14...468.97....25.....8..3.4...",
+  ".2..7.8.1..89...........75.....89..2..45...........1.6..726...9.....8.....67..4.5",
+  "........6..9.43..2...2.9..778.........2.5.3......1..5....4..87...4.9....8....16.4",
+  "...7..368...3.....2....94...8..96.1....5......6.....4.6.29....3.7..3..2.9......51",
+];
+
+test("解説の手順: 候補を消す手筋を使えば、答えから置かずに最後まで解ける", () => {
+  const used = new Set();
+  for (const text of TECHNIQUE_PUZZLES) {
+    const steps = checkSteps(parse(text));
+    assert.ok(steps.every((s) => s.technique !== "answer"));
+    for (const s of steps) {
+      if (s.technique === "lockedCandidates") used.add(s.baseKind === "box" ? "pointing" : "claiming");
+      else if (s.removed) used.add(`${s.technique}${s.cells.length}`);
+    }
+  }
+  assert.deepEqual([...used].sort(), ["claiming", "hiddenSubset2", "hiddenSubset3", "nakedSubset2", "nakedSubset3", "pointing", "xWing4"]);
 });
 
 test("解説の手順: 空きが1つだけのユニットは、ほかの空きマスなしのヒドゥンシングル", () => {
