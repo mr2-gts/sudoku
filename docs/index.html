@@ -54,7 +54,23 @@
         </div>
       </div>
       <div class="buttons">
+        <button id="explain-start" class="button primary" type="button" data-i18n="explainStart" hidden>解き方を見る</button>
         <button id="edit" class="button" type="button" data-i18n="edit">読み取り結果を直す</button>
+      </div>
+
+      <!-- 解説モード。「次へ」を押し続けやすいよう、長さが変わる文は操作ボタンより下に置く -->
+      <div id="explain" hidden>
+        <div class="buttons">
+          <button id="step-prev" class="button" type="button" data-i18n="stepPrev">前へ</button>
+          <span id="step-count" class="step-count"></span>
+          <button id="step-next" class="button primary" type="button" data-i18n="stepNext">次へ</button>
+        </div>
+        <p id="step-note" class="legend"></p>
+        <div class="buttons">
+          <button id="reason" class="button" type="button" data-i18n="reasonShow">解説</button>
+          <button id="explain-end" class="button" type="button" data-i18n="explainEnd">答えの表示に戻る</button>
+        </div>
+        <p id="reason-text" class="reason" hidden></p>
       </div>
 
       <details id="preview-box">

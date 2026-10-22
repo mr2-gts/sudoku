@@ -11,6 +11,10 @@
   --button: #f0f0f0;
   --primary: #1565c0;
   --error: #c62828;
+  --area: #e6edf5;
+  --current: #b9d6ff;
+  --blocker: #ffd8a0;
+  --guessed: #8e24aa;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -26,6 +30,10 @@
     --button: #2a2a2a;
     --primary: #1e88e5;
     --error: #ef5350;
+    --area: #1f2833;
+    --current: #1e3a5f;
+    --blocker: #6b4500;
+    --guessed: #ce93d8;
   }
 }
 
@@ -85,6 +93,16 @@ h1 { font-size: 1.4rem; margin: 0 0 8px; }
 .cell.unsure { background: var(--unsure); }
 .editing .cell { cursor: pointer; }
 .cell.selected { background: var(--selected); }
+/* 解説モード: 理由に関係するユニット、理由になる数字、今回置いたマス、置けないマス（×）、答えから置いた数字 */
+.cell.area { background: var(--area); }
+.cell.blocker { background: var(--blocker); }
+.cell.current { background: var(--current); box-shadow: inset 0 0 0 3px var(--primary); }
+.cell.excluded { color: var(--muted); }
+.cell.guessed { color: var(--guessed); }
+
+.button:disabled { opacity: 0.4; cursor: default; }
+.step-count { align-self: center; min-width: 4.5em; text-align: center; font-variant-numeric: tabular-nums; }
+.reason { padding: 12px; border-radius: 10px; background: var(--button); line-height: 1.6; }
 
 .pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 12px; }
 .pad button {
