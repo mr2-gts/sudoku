@@ -4,11 +4,13 @@
 // 1. 数字を置く手（シングル）
 //    - ヒドゥンシングル … ある行・列・ブロックの中で、その数字が入りうるマスが1か所しかない
 //    - ネイキッドシングル … そのマスの候補が1つしか残っていない
-// 2. シングルが見つからなければ、候補を消す手（中級の手筋と X-Wing）
+// 2. シングルが見つからなければ、候補を消す手（中級の手筋、X-Wing、XY-Wing、ソードフィッシュ）
 //    - ロックト・キャンディデート … ブロック（行・列）の中で、その数字が入りうるマスが、1つの行・列（ブロック）との重なりに限られる
 //    - ネイキッドペア・トリプル … 行・列・ブロックの2〜3マスの候補が、合わせて同じ数の数字しかない
 //    - ヒドゥンペア・トリプル … 行・列・ブロックの中で、2〜3個の数字が入りうるマスが、同じ数のマスに限られる
 //    - X-Wing … 2つの行（列）で、ある数字が入りうるマスがそれぞれ2つだけで、それが同じ2つの列（行）に並ぶ
+//    - XY-Wing … 候補が x・y の軸のマスから、候補が x・z と y・z の2つのマス（羽）が見える。軸がどちらでも、羽のどちらかが z になる
+//    - ソードフィッシュ … X-Wing を3本に広げたもの。3つの行（列）で、ある数字が入りうるマスが、合わせて3つの列（行）に収まる
 // 3. どれも見つからないときは、答えから1マス埋めて続ける（理由は示せない）。
 
 import { PEERS, UNITS } from "./solver.js?v=af66d12c";
@@ -42,7 +44,10 @@ const kindOf = (u) => UNIT_KINDS[Math.floor(u / 9)];
 // area（関係する行・列・ブロックのマス）を持つ。technique ごとの項目:
 // - "lockedCandidates": baseKind（数字が重なりに限られるユニットの種類）、coverKind（候補を消すユニットの種類）
 // - "nakedSubset" / "hiddenSubset": unitKind（cells の数が2ならペア、3ならトリプル）
-// - "xWing": baseKind（数字が2マスに限られる2本の種類）、coverKind（候補を消す2本の種類）
+// - "xWing" / "swordfish": baseKind（数字が入りうるマスが限られる行または列。X-Wing は2本、ソードフィッシュは3本）、
+//   coverKind（候補を消す行または列）
+// - "xyWing": pivot（軸のマス）、pincers（2つの羽のマス。1つ目の候補は x・z、2つ目は y・z）。cells は [軸, 羽, 羽]、
+//   digits は [x, y, z]（軸の候補 x・y と、消す数字 z）、area は両方の羽から見えるマス（軸を除く）
 export function solveSteps(puzzle, solution) {
   const board = puzzle.slice();
   const cand = board.map((d, i) => (d ? 0 : DIGITS.filter((x) => !PEERS[i].some((p) => board[p] === x)).reduce((m, x) => m | bitOf(x), 0)));
@@ -162,7 +167,9 @@ function findElimination(cand) {
     findHiddenSubset(cand, 2) ??
     findNakedSubset(cand, 3) ??
     findHiddenSubset(cand, 3) ??
-    findXWing(cand)
+    findFish(cand, 2) ??
+    findXyWing(cand) ??
+    findFish(cand, 3)
   );
 }
 
@@ -244,31 +251,55 @@ function findHiddenSubset(cand, n) {
   return null;
 }
 
-// 2つの行で digit が入りうるマスがそれぞれ2つだけで、それが同じ2つの列に並べば、その2列のほかのマスに digit は入らない
-// （行と列を入れ替えても同じ）
-function findXWing(cand) {
+// n 本の行で digit が入りうるマスがそれぞれ n 個以下で、それが合わせて n 本の列に収まれば、その n 列の digit は
+// これらのマスに入るので、n 列のほかのマスに digit は入らない（行と列を入れ替えても同じ）。n=2 が X-Wing、n=3 がソードフィッシュ
+function findFish(cand, n) {
   for (const digit of DIGITS) {
     const bit = bitOf(digit);
     for (const baseStart of [0, 9]) {
       const coverStart = 9 - baseStart;
       const coverOf = (c) => (baseStart === 0 ? c % 9 : Math.floor(c / 9));
-      const lines = [...Array(9).keys()].filter((i) => UNITS[baseStart + i].filter((c) => cand[c] & bit).length === 2);
-      for (const [a, b] of combinations(lines, 2)) {
-        const cells = [...UNITS[baseStart + a], ...UNITS[baseStart + b]].filter((c) => cand[c] & bit);
+      const places = (i) => UNITS[baseStart + i].filter((c) => cand[c] & bit).length;
+      const lines = [...Array(9).keys()].filter((i) => places(i) >= 2 && places(i) <= n);
+      for (const bases of combinations(lines, n)) {
+        const baseCells = bases.flatMap((i) => UNITS[baseStart + i]);
+        const cells = baseCells.filter((c) => cand[c] & bit);
         const covers = [...new Set(cells.map(coverOf))];
-        if (covers.length !== 2) continue;
+        if (covers.length !== n) continue;
         const coverCells = covers.flatMap((j) => UNITS[coverStart + j]);
         const removed = removalsOf(cand, coverCells.filter((c) => !cells.includes(c)), bit);
         if (!removed.length) continue;
         return {
-          technique: "xWing",
+          technique: n === 2 ? "xWing" : "swordfish",
           baseKind: kindOf(baseStart),
           coverKind: kindOf(coverStart),
           cells,
           digits: [digit],
-          area: [...new Set([...UNITS[baseStart + a], ...UNITS[baseStart + b], ...coverCells])],
+          area: [...new Set([...baseCells, ...coverCells])],
           removed,
         };
+      }
+    }
+  }
+  return null;
+}
+
+// 候補が x・y の軸のマスから、候補が x・z と y・z の2つの羽のマスが見えれば、軸が x なら1つ目の羽が z、y なら2つ目の羽が z になる。
+// どちらでも羽のどちらかに z が入るので、両方の羽から見えるマスに z は入らない
+function findXyWing(cand) {
+  const pairs = [...Array(81).keys()].filter((c) => popcount(cand[c]) === 2);
+  for (const pivot of pairs) {
+    const [x, y] = digitsOf(cand[pivot]);
+    const wings = pairs.filter((c) => PEERS[pivot].includes(c));
+    for (const a of wings) {
+      if (!(cand[a] & bitOf(x)) || cand[a] & bitOf(y)) continue; // 1つ目の羽は x と、y でない z
+      const zBit = cand[a] & ~bitOf(x);
+      for (const b of wings) {
+        if (cand[b] !== (bitOf(y) | zBit)) continue; // 2つ目の羽は y と z
+        const seen = PEERS[a].filter((c) => c !== pivot && PEERS[b].includes(c));
+        const removed = removalsOf(cand, seen, zBit);
+        if (!removed.length) continue;
+        return { technique: "xyWing", pivot, pincers: [a, b], cells: [pivot, a, b], digits: [x, y, digitsOf(zBit)[0]], area: seen, removed };
       }
     }
   }
