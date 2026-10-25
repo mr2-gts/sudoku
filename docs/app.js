@@ -3,8 +3,8 @@
 
 import { DigitClassifier, readPuzzle } from "./vision.js?v=e21ac435";
 import { SudokuError, solve } from "./solver.js?v=af66d12c";
-import { solveSteps } from "./steps.js?v=e6e2488c";
-import { t } from "./i18n.js?v=36940c4c";
+import { solveSteps } from "./steps.js?v=c0576fb3";
+import { t } from "./i18n.js?v=fda75771";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）。
 // 大きいまま処理すると、画面のモアレなどで2値化した盤面の外枠が途切れ、盤面を見つけられないこともある（Python 版で確認。Issue #18）
@@ -311,6 +311,8 @@ const TECHNIQUE_NAMES = {
   nakedSingle: "techNakedSingle",
   lockedCandidates: "techLockedCandidates",
   xWing: "techXWing",
+  xyWing: "techXyWing",
+  swordfish: "techSwordfish",
 };
 
 // 手筋の名前（答えから置いた手は名前なし）
@@ -350,8 +352,13 @@ function reasonText(step) {
   if (step.technique === "nakedSubset" || step.technique === "hiddenSubset") {
     return t(step.technique, { unit: t(UNIT_TEXT[step.unitKind].unit), count: step.cells.length, digits: list(step.digits) });
   }
-  if (step.technique === "xWing") {
-    return t("xWing", { bases: t(UNIT_TEXT[step.baseKind].units), covers: t(UNIT_TEXT[step.coverKind].units), digit: step.digits[0] });
+  if (step.technique === "xWing" || step.technique === "swordfish") {
+    return t(step.technique, { bases: t(UNIT_TEXT[step.baseKind].units), covers: t(UNIT_TEXT[step.coverKind].units), digit: step.digits[0] });
+  }
+  if (step.technique === "xyWing") {
+    const [x, y, z] = step.digits;
+    const pair = (a, b) => list([a, b].sort((m, n) => m - n)); // 羽の候補は小さい順に書く
+    return t("xyWing", { x, y, z, xz: pair(x, z), yz: pair(y, z) });
   }
   return t("answerStep");
 }
@@ -396,6 +403,7 @@ function renderExplainGrid() {
       if (area.has(i)) cell.classList.add("area");
       if (blockers.has(i)) cell.classList.add("blocker");
       if (pattern.has(i)) cell.classList.add("pattern");
+      if (i === reason.pivot) cell.classList.add("pivot"); // XY-Wing の軸
       if (removed.has(i)) cell.classList.add("changed");
       if (i === step?.cell) cell.classList.add("current");
       return cell;
