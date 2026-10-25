@@ -28,7 +28,7 @@ const state = {
 // 見本データの読み込み（ページを開いたときに始める）
 // ---------------------------------------------------------------------------
 const classifierPromise = (async () => {
-  const res = await fetch("digit_model.bin.gz?v=27beffbe");
+  const res = await fetch("digit_model.bin.gz?v=86ba9f55");
   if (!res.ok) throw new Error(t("modelError", { status: res.status }));
   let buf = await res.arrayBuffer();
   const head = new Uint8Array(buf, 0, 2);
