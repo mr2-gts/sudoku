@@ -16,6 +16,9 @@
   --blocker: #ffd8a0;
   --removed: #f2d0d0;
   --guessed: #8e24aa;
+  --pattern-alt: #c8ebc8;
+  --key-alt: #2e7d32;
+  --link: #e65100;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -36,6 +39,9 @@
     --blocker: #6b4500;
     --removed: #432020;
     --guessed: #ce93d8;
+    --pattern-alt: #1e3d24;
+    --key-alt: #81c784;
+    --link: #ffb74d;
   }
 }
 
@@ -74,6 +80,7 @@ h1 { font-size: 1.4rem; margin: 0 0 8px; }
   width: 100%;
   aspect-ratio: 1;
   border: 3px solid var(--line);
+  position: relative; /* チェーン系の手筋のリンクの線（.links）を重ねるため */
 }
 .cell {
   display: flex;
@@ -95,12 +102,13 @@ h1 { font-size: 1.4rem; margin: 0 0 8px; }
 .cell.unsure { background: var(--unsure); }
 .editing .cell { cursor: pointer; }
 .cell.selected { background: var(--selected); }
-/* 解説モード: 理由に関係するユニット、理由になる数字、手筋の形をつくるマス、今回置いたマス、候補を消したマス、
-   置けないマス（×）、答えから置いた数字 */
+/* 解説モード: 理由に関係するユニット、理由になる数字、手筋の形をつくるマス（シンプルカラーリングの2色目は緑）、
+   今回置いたマス、候補を消したマス、置けないマス（×）、答えから置いた数字 */
 .cell.area { background: var(--area); }
 .cell.blocker { background: var(--blocker); }
 .cell.pattern { background: var(--current); }
-.cell.pivot { box-shadow: inset 0 0 0 3px var(--filled); } /* XY-Wing の軸 */
+.cell.pattern-alt { background: var(--pattern-alt); }
+.cell.pivot { box-shadow: inset 0 0 0 3px var(--filled); } /* XY-Wing の軸、W-Wing の2つのマス、X-Chain の両端 */
 .cell.current { background: var(--current); box-shadow: inset 0 0 0 3px var(--primary); }
 .cell.changed { box-shadow: inset 0 0 0 2px var(--error); }
 .cell.excluded { color: var(--muted); }
@@ -126,6 +134,11 @@ h1 { font-size: 1.4rem; margin: 0 0 8px; }
     var(--removed);
 }
 .cell .key { color: var(--filled); font-weight: bold; }
+.cell .key-alt { color: var(--key-alt); font-weight: bold; }
+/* チェーン系の手筋のリンク。強いリンクは実線、弱いリンクは点線（座標は 1マス = 1） */
+.links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.links path { fill: none; stroke: var(--link); stroke-width: 0.05; stroke-linecap: round; }
+.links .weak { stroke-dasharray: 0.01 0.12; stroke-width: 0.07; }
 
 .button:disabled { opacity: 0.4; cursor: default; }
 .step-count { align-self: center; min-width: 4.5em; text-align: center; font-variant-numeric: tabular-nums; }

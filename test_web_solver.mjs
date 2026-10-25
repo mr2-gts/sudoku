@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
-import { PEERS, SudokuError, parse, solve } from "./docs/solver.js";
+import { PEERS, SudokuError, UNITS, parse, solve } from "./docs/solver.js";
 import { findHiddenSubset, solveSteps } from "./docs/steps.js";
 
 const isValid = (g) => [...Array(9)].every((_, k) => {
@@ -41,6 +41,73 @@ test("同じ行に同じ数字があればエラー", () => {
 const bitOf = (d) => 1 << (d - 1);
 const DIGITS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const sorted = (a) => [...a].sort((x, y) => x - y);
+
+// チェーン系の手（W-Wing、シンプルカラーリング、X-Chain）の理由が成り立つことを確かめる。cand はこの手の前の候補
+function checkChain(s, cand) {
+  const has = (c, d) => (cand[c] & bitOf(d)) !== 0;
+  const sees = (a, b) => PEERS[a].includes(b);
+  // 強いリンクは、その数字が入りうるマスが2つだけのユニットの2マス。弱いリンクは、同じユニットにある、その数字が入りうる2マス
+  const isStrong = (a, b, d) => UNITS.some((u) => u.includes(a) && u.includes(b) && u.filter((c) => has(c, d)).length === 2);
+  for (const { from, to, digit, strong } of s.links) {
+    assert.ok(has(from, digit) && has(to, digit) && sees(from, to));
+    if (strong) assert.ok(isStrong(from, to, digit));
+  }
+  const removedCells = s.removed.map((r) => r.cell);
+  if (s.technique === "wWing") {
+    // 候補が x・y の、互いに見えない2つのマス。x の強いリンクの両端が、それぞれのマスから見える（弱いリンク）。
+    // 両方のマスから見えるマスから y だけを消す
+    const [x, y] = s.digits;
+    const [a, b] = s.pincers;
+    assert.deepEqual(s.cells, [a, b]);
+    assert.ok(cand[a] === (bitOf(x) | bitOf(y)) && cand[b] === cand[a] && !sees(a, b));
+    assert.deepEqual(s.links.map((l) => [l.digit, l.strong]), [[x, false], [x, true], [x, false]]);
+    assert.ok(s.links[0].from === a && s.links[1].from === s.links[0].to && s.links[2].from === s.links[1].to && s.links[2].to === b);
+    assert.ok(removedCells.every((c) => sees(a, c) && sees(b, c)));
+    assert.ok(s.removed.every((r) => r.digits.length === 1 && r.digits[0] === y));
+    return;
+  }
+  const d = s.digits[0];
+  assert.equal(s.digits.length, 1);
+  assert.ok(s.links.every((l) => l.digit === d));
+  assert.ok(s.removed.every((r) => r.digits.length === 1 && r.digits[0] === d));
+  if (s.technique === "xChain") {
+    // cells を順に、強いリンク・弱いリンクが交互につなぐ（両端は強いリンク）。両端から見えるマス（チェーンのマスを除く）から消す
+    const { cells } = s;
+    assert.equal(new Set(cells).size, cells.length);
+    assert.equal(s.links.length, cells.length - 1);
+    assert.equal(s.links.length % 2, 1);
+    s.links.forEach((l, i) => assert.ok(l.from === cells[i] && l.to === cells[i + 1] && l.strong === (i % 2 === 0)));
+    assert.ok(removedCells.every((c) => !cells.includes(c) && sees(cells[0], c) && sees(cells.at(-1), c)));
+    return;
+  }
+  assert.equal(s.technique, "simpleColoring");
+  // 強いリンクでつながったマスを2色に塗り分けている（リンクの両端は別の色で、すべてのマスがつながっている）
+  const [first, second] = s.colors;
+  assert.deepEqual(sorted(s.cells), sorted([...first, ...second]));
+  assert.equal(new Set(s.cells).size, s.cells.length);
+  assert.ok(s.links.every((l) => l.strong && first.includes(l.from) !== first.includes(l.to)));
+  const reached = new Set([s.cells[0]]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const l of s.links) {
+      if (reached.has(l.from) !== reached.has(l.to)) {
+        [l.from, l.to].forEach((c) => reached.add(c));
+        grew = true;
+      }
+    }
+  }
+  assert.equal(reached.size, s.cells.length);
+  if (s.rule === "wrap") {
+    // 同じ色のマスが2つある行・列・ブロックがあり、その色のマスすべてから消す
+    const wrong = s.colors[s.wrongColor];
+    assert.ok(UNITS.some((u) => u.filter((c) => wrong.includes(c)).length >= 2));
+    assert.deepEqual(sorted(removedCells), sorted(wrong));
+  } else {
+    // 両方の色のマスから見えるマスから消す
+    assert.equal(s.rule, "trap");
+    assert.ok(removedCells.every((c) => !s.cells.includes(c) && s.colors.every((g) => g.some((p) => sees(p, c)))));
+  }
+}
 
 function checkSteps(grid) {
   const { solution } = solve(grid);
@@ -89,6 +156,8 @@ function checkSteps(grid) {
         const watchers = xyz ? [pivot, a, b] : [a, b];
         assert.ok(s.removed.every((r) => watchers.every((c) => PEERS[c].includes(r.cell))));
         assert.ok(s.removed.every((r) => r.digits.length === 1 && r.digits[0] === z));
+      } else if (s.links) {
+        checkChain(s, cand);
       } else {
         assert.ok(["lockedCandidates", "xWing", "swordfish", "jellyfish"].includes(s.technique));
         assert.equal(s.digits.length, 1);
@@ -149,7 +218,7 @@ test("解説の手順: hard は扱う手筋で進めないので、答えから�
   assert.equal(steps[0].technique, "answer");
 });
 
-// テスト用に乱数で作った問題（解は一意）。8問で、ヒドゥンクアッドとジェリーフィッシュ以外の候補を消す手筋をすべて使う
+// テスト用に乱数で作った問題（解は一意）。11問で、ヒドゥンクアッドとジェリーフィッシュ以外の候補を消す手筋をすべて使う
 const TECHNIQUE_PUZZLES = [
   "....43.2.4.37....5...2..9.........8..9....3..2.7..14...468.97....25.....8..3.4...",
   ".2..7.8.1..89...........75.....89..2..45...........1.6..726...9.....8.....67..4.5",
@@ -159,6 +228,9 @@ const TECHNIQUE_PUZZLES = [
   "........9..4.137.....6..3.8.52....4..389.......1.8.........6....2..7.19.4......2.", // ソードフィッシュ
   "....5...91.53.7.....9...3....8...2..69.1....4..2.7..61543..2.7...1..4..2...5.....", // XYZ-Wing
   "..9....7..3........4...7.65.......2...14....6.8..3...78..5.....15...4..8.7.2.8..3", // ネイキッドクアッド
+  ".72.5....3.16.........7.8...5...4..........42..7.8...9..6...1..1...25...28..1.4..", // X-Chain
+  ".5..9.....17...92...8.6.......2.....36...57.....78.1.........914......86.8....3..", // シンプルカラーリング（2種類とも）
+  "..7..4235.9......44.....18.9..5.2.....2.7....1...48....2..8..43.3.2....1..9...8.2", // W-Wing
 ];
 
 test("解説の手順: 候補を消す手筋を使えば、答えから置かずに最後まで解ける", () => {
@@ -168,10 +240,14 @@ test("解説の手順: 候補を消す手筋を使えば、答えから置かず
     assert.ok(steps.every((s) => s.technique !== "answer"));
     for (const s of steps) {
       if (s.technique === "lockedCandidates") used.add(s.baseKind === "box" ? "pointing" : "claiming");
+      else if (s.technique === "simpleColoring") used.add(`${s.technique}:${s.rule}`);
       else if (s.removed) used.add(s.technique.endsWith("Subset") ? `${s.technique}${s.cells.length}` : s.technique);
     }
   }
-  const all = ["claiming", "hiddenSubset2", "hiddenSubset3", "nakedSubset2", "nakedSubset3", "nakedSubset4", "pointing", "swordfish", "xWing", "xyWing", "xyzWing"];
+  const all = [
+    "claiming", "hiddenSubset2", "hiddenSubset3", "nakedSubset2", "nakedSubset3", "nakedSubset4", "pointing",
+    "simpleColoring:trap", "simpleColoring:wrap", "swordfish", "wWing", "xChain", "xWing", "xyWing", "xyzWing",
+  ];
   assert.deepEqual([...used].sort(), all);
 });
 
