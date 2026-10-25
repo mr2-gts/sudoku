@@ -9,6 +9,10 @@
 //   2. 歪み補正 … 四隅から射影変換して 450x450 の正方形にする。
 //   3. マス分割 … 50x50 ずつ 81 マスに分け、中央付近の、背景よりはっきり濃い塊を数字とみなす。
 //   4. 数字認識 … 28x28 に正規化し、見本データと比べる k 近傍法（k=5）。
+//   5. 自動修正 … 読み取った盤面が成り立たない（重複・解なし・解が複数）ときは、近い見本の票が割れていたマスの
+//                 数字を置き換えて、解がちょうど1つになる盤面を探す（autoCorrect）。
+
+import { SudokuError, solve } from "./solver.js?v=af66d12c";
 
 export const CELL = 50; // 補正後の1マスのピクセル数
 export const BOARD = CELL * 9;
@@ -448,6 +452,11 @@ export function toFeature(norm) {
   return v.map((x) => x / len);
 }
 
+const ALT_K = 15; // 読み取りを自動で直すとき、置き換える候補を選ぶために見る近い見本の件数
+const ALT_MIN_VOTES = 2; // 置き換える候補にする数字の票数の下限（ALT_K 件中）。1票だけの数字は候補にしない
+const MAX_FIXES = 4; // 自動で直すまとまり（形の似たマスどうし。lookalikeGroups）の数の上限
+const MAX_TRIALS = 2000; // 自動で直すときに試す盤面の数の上限（候補のマスが多い写真で時間がかかりすぎないように）
+
 // 見本データ（tools/export_web_model.py が作るファイルを展開したもの）との k 近傍法
 export class DigitClassifier {
   constructor(buffer, k = 5) {
@@ -459,34 +468,43 @@ export class DigitClassifier {
     this.k = k;
   }
 
-  // { digit: 数字, confidence: 近傍 k 件のうち同じ数字の割合 }
+  // { digit: 数字, confidence: 近傍 k 件のうち同じ数字の割合,
+  //   alternatives: 近傍 ALT_K 件で ALT_MIN_VOTES 票以上を得た、選んだ数字以外の数字（票の多い順） }
   predict(norm) {
-    const f = toFeature(norm), dim = this.dim;
-    const top = []; // 類似度の高い順に k 件 [類似度, ラベル]
+    const f = toFeature(norm), dim = this.dim, size = Math.max(this.k, ALT_K);
+    const top = []; // 類似度の高い順に size 件 [類似度, ラベル]
     for (let i = 0; i < this.n; i++) {
       let s = 0;
       const base = i * dim;
       for (let j = 0; j < dim; j++) s += this.features[base + j] * f[j];
-      if (top.length < this.k || s > top[top.length - 1][0]) {
+      if (top.length < size || s > top[top.length - 1][0]) {
         top.push([s, this.labels[i]]);
         top.sort((a, b) => b[0] - a[0]);
-        if (top.length > this.k) top.pop();
+        if (top.length > size) top.pop();
       }
     }
-    const votes = new Array(10).fill(0);
-    for (const [, d] of top) votes[d]++;
+    const votes = new Array(10).fill(0), wide = new Array(10).fill(0);
+    top.forEach(([, d], rank) => {
+      if (rank < this.k) votes[d]++;
+      wide[d]++;
+    });
     const digit = votes.indexOf(Math.max(...votes));
-    return { digit, confidence: votes[digit] / this.k };
+    const alternatives = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+      .filter((d) => d !== digit && wide[d] >= ALT_MIN_VOTES)
+      .sort((a, b) => wide[b] - wide[a]);
+    return { digit, confidence: votes[digit] / this.k, alternatives };
   }
 }
 
 // グレースケール画像から盤面を読み取る。
-// 戻り値: { grid: 81 マス（0=空き）, confidence: マスごとの確からしさ（空きは 1）, board: 補正後の盤面画像 }
+// 戻り値: { grid: 81 マス（0=空き）, confidence: マスごとの確からしさ（空きは 1）, board: 補正後の盤面画像,
+//           alternatives: マスごとの、ほかの候補の数字（predict。空きは []）,
+//           lookalike: マスごとの、同じ画像の中でいちばん形の似た数字のマス（空きや、ほかに数字がないときは -1） }
 export function readPuzzle(gray, classifier) {
   if (Math.max(gray.w, gray.h) < 300) gray = resizeLinear(gray, gray.w * 2, gray.h * 2); // 小さい画像は拡大してから処理する
   const board = warpBoard(gray, findBoard(gray));
   const bin = binarize(board);
-  const grid = [], confidence = [];
+  const grid = [], confidence = [], alternatives = [], feats = new Map();
   const m = CELL / 10; // 罫線を避ける余白
   const size = CELL - 2 * m;
   for (let r = 0; r < 9; r++) {
@@ -503,12 +521,126 @@ export function readPuzzle(gray, classifier) {
       if (!digit) {
         grid.push(0);
         confidence.push(1);
+        alternatives.push([]);
       } else {
-        const p = classifier.predict(normalizeDigit(digit));
+        const norm = normalizeDigit(digit);
+        const p = classifier.predict(norm);
         grid.push(p.digit);
         confidence.push(p.confidence);
+        alternatives.push(p.alternatives);
+        feats.set(r * 9 + c, toFeature(norm));
       }
     }
   }
-  return { grid, confidence, board };
+  return { grid, confidence, board, alternatives, lookalike: lookalikes(feats) };
+}
+
+// マスごとに、同じ画像の中でいちばん形の似た数字のマスを返す（空きや、ほかに数字がないときは -1）
+function lookalikes(feats) {
+  const result = new Array(81).fill(-1);
+  for (const [i, fi] of feats) {
+    let best = -Infinity;
+    for (const [j, fj] of feats) {
+      if (j === i) continue;
+      let s = 0;
+      for (let k = 0; k < fi.length; k++) s += fi[k] * fj[k];
+      if (s > best) (best = s), (result[i] = j);
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// 5. 読み取りの自動修正（Python 版の auto_correct と同じ）
+// ---------------------------------------------------------------------------
+
+function hasOneSolution(grid) {
+  try {
+    return solve(grid, 2).solutionCount === 1;
+  } catch (e) {
+    if (e instanceof SudokuError) return false; // 同じ行・列・ブロックに同じ数字がある
+    throw e;
+  }
+}
+
+// いちばん形の似たマスと同じ数字に読んだマスどうしを、つないでまとめる。
+// 同じ画像の中で同じ数字が2回以上あるとき、いちばん形の似たマスは同じ数字だった（確認した 21 枚すべて）。
+// 同じ形の数字は同じように読み誤るので、まとめて直す。1つだけ直すと、残りを誤ったまま
+// 解がちょうど1つの盤面になり、違う答えを出すことがあった（Issue #21 のスクリーンショットの1枚）。
+export function lookalikeGroups(grid, lookalike) {
+  const parent = [...Array(81).keys()];
+  const root = (i) => {
+    while (parent[i] !== i) i = parent[i];
+    return i;
+  };
+  lookalike.forEach((j, i) => {
+    if (j >= 0 && grid[i] === grid[j]) parent[root(i)] = root(j);
+  });
+  const groups = new Map();
+  for (let i = 0; i < 81; i++) {
+    if (!grid[i]) continue;
+    const r = root(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  return [...groups.values()];
+}
+
+// arr から k 個を選ぶ組み合わせ（Python の itertools.combinations と同じ順）
+function* combinations(arr, k, start = 0, picked = []) {
+  if (picked.length === k) {
+    yield picked;
+    return;
+  }
+  for (let i = start; i <= arr.length - (k - picked.length); i++) yield* combinations(arr, k, i + 1, [...picked, arr[i]]);
+}
+
+// 選択肢の並びから1つずつ選ぶ組み合わせ（Python の itertools.product と同じ順）
+function* product(lists, picked = []) {
+  if (picked.length === lists.length) {
+    yield picked;
+    return;
+  }
+  for (const x of lists[picked.length]) yield* product(lists, [...picked, x]);
+}
+
+// 読み取った盤面が成り立たない（重複・解なし・解が複数）とき、ほかの候補の数字に置き換えて直す。
+// 形の似たマスのまとまり（lookalikeGroups）ごとに、まとまりのどれかのマスのほかの候補の数字に置き換える。
+// 置き換えるまとまりの数を 1 つ、2 つ…と MAX_FIXES まで増やし、解がちょうど 1 つになる盤面を探す。
+// 最も少ない置き換えで見つかった盤面が 1 つだけで、置き換えを 1 つ増やすと解がちょうど 1 つになる盤面がないなら
+// { grid: 直した盤面, cells: 置き換えたマス } を返す。それ以外（盤面が成り立つ・見つからない・1 つに決められない・
+// 試す盤面が MAX_TRIALS を超える）は null（そのときは今までどおり利用者に直してもらう）。
+export function autoCorrect(grid, alternatives, lookalike) {
+  // 17 個未満は、どう置き換えても解が 1 つにならない（盤面を見つけ損ねた可能性が高い）
+  if (grid.filter((d) => d).length < 17 || hasOneSolution(grid)) return null;
+  const groups = [];
+  for (const members of lookalikeGroups(grid, lookalike)) {
+    const digits = [...new Set(members.flatMap((i) => alternatives[i]))].filter((d) => d !== grid[members[0]]).sort((a, b) => a - b);
+    if (digits.length) groups.push({ members, digits });
+  }
+  let trials = 0;
+  // まとまりを n 個置き換えて、解がちょうど 1 つになる盤面の一覧。試す盤面が MAX_TRIALS を超えたら null
+  const boards = (n) => {
+    const found = [];
+    for (const chosen of combinations(groups, n)) {
+      for (const digits of product(chosen.map((g) => g.digits))) {
+        if (++trials > MAX_TRIALS) return null;
+        const trial = grid.slice();
+        chosen.forEach((g, k) => g.members.forEach((i) => (trial[i] = digits[k])));
+        if (hasOneSolution(trial)) found.push({ grid: trial, cells: chosen.flatMap((g) => g.members).sort((a, b) => a - b) });
+      }
+    }
+    return found;
+  };
+  for (let n = 1; n <= Math.min(MAX_FIXES, groups.length); n++) {
+    const found = boards(n);
+    if (!found || found.length > 1) return null;
+    if (found.length) {
+      // 読み誤りが 2 か所あるとき、1 か所だけ直した盤面でも解がちょうど 1 つになり、違う答えを出すことがある
+      // （読み誤りを入れて試すと 3% ほど）。置き換えを 1 つ増やして解が 1 つになる盤面があれば、決めない。
+      const more = n < groups.length ? boards(n + 1) : [];
+      return more && more.length === 0 ? found[0] : null;
+    }
+  }
+  return null;
 }

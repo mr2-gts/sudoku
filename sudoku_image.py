@@ -10,7 +10,8 @@
     2. マス分割 … 補正した盤面を 9x9 に等分する。
     3. 数字認識 … 各マスの中央付近にある黒い塊を数字とみなし、見本データ
        （digit_model.npz）と形を比べていちばん近い数字を選ぶ（k近傍法）。塊がなければ空き。
-    4. 解く   … sudoku_solver.solve で解く。
+    4. 解く   … sudoku_solver.solve で解く。読み取った盤面が成り立たない（重複・解なし・解が複数）ときは、
+       近い見本の票が割れていたマスの数字を置き換えて、解がちょうど1つになる盤面を探す（auto_correct）。
     5. 出力   … 解答をテキストで表示する。-o を指定したときだけ解答画像
        （元の数字=黒、埋めた数字=青）を保存する。問題や画像は保存しない。
        読み取りを誤って解けなかった場合は、表示された読み取り結果を直してテキストファイルにし、
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
+from itertools import combinations, product
 from pathlib import Path
 
 import cv2
@@ -39,6 +41,10 @@ MAX_SIDE = 1200  # 大きな写真はこの大きさまで縮小してから読�
 MIN_CONTRAST = 45  # 数字とみなす濃さの下限（背景の明るさとの差、0〜255）。写真の数字は 60 以上、ノイズは 40 以下だった
 WEAK_CONTRAST_RATIO = 0.25  # 数字の濃い部分の何割の濃さまでを、つながった線として数字に含めるか
 WEAK_CONTRAST_MIN = 15  # 同上の下限（背景の明るさとの差）
+ALT_K = 15  # 読み取りを自動で直すとき、置き換える候補を選ぶために見る近い見本の件数
+ALT_MIN_VOTES = 2  # 置き換える候補にする数字の票数の下限（ALT_K 件中）。1票だけの数字は候補にしない
+MAX_FIXES = 4  # 自動で直すまとまり（形の似たマスどうし。_lookalike_groups）の数の上限
+MAX_TRIALS = 2000  # 自動で直すときに試す盤面の数の上限（候補のマスが多い写真で時間がかかりすぎないように）
 
 
 class ImageReadError(Exception):
@@ -99,13 +105,19 @@ class DigitClassifier:
         self.labels = data["labels"]
         self.k = k
 
-    def predict(self, norm: np.ndarray) -> tuple[int, float]:
-        """(数字, 確からしさ 0〜1) を返す。確からしさ = 近傍 k 件のうち同じ数字の割合。"""
+    def predict(self, norm: np.ndarray) -> tuple[int, float, list[int]]:
+        """(数字, 確からしさ 0〜1, ほかの候補) を返す。
+
+        確からしさ = 近傍 k 件のうち同じ数字の割合。
+        ほかの候補 = 近傍 ALT_K 件で ALT_MIN_VOTES 票以上を得た、選んだ数字以外の数字（票の多い順）。
+        """
         sims = self.features @ to_feature(norm)  # 正規化済みベクトルの内積 = コサイン類似度
-        nearest = self.labels[np.argsort(sims)[-self.k :]]
-        votes = np.bincount(nearest, minlength=10)
+        nearest = self.labels[np.argsort(sims)[-max(self.k, ALT_K) :]]  # 類似度の低い順
+        votes = np.bincount(nearest[-self.k :], minlength=10)
         digit = int(votes.argmax())
-        return digit, votes[digit] / self.k
+        wide = np.bincount(nearest, minlength=10)
+        alternatives = [int(d) for d in np.argsort(-wide, kind="stable") if d != digit and wide[d] >= ALT_MIN_VOTES]
+        return digit, votes[digit] / self.k, alternatives
 
 
 def extract_digit(cell_bin: np.ndarray, cell_gray: np.ndarray) -> np.ndarray | None:
@@ -152,6 +164,8 @@ class Reading:
     grid: list[int]  # 読み取った盤面（0=空き）
     confidence: list[float]  # マスごとの確からしさ（空きは 1.0）
     board: np.ndarray  # 補正後の盤面画像（グレースケール）
+    alternatives: list[list[int]]  # マスごとの、ほかの候補の数字（DigitClassifier.predict。空きは []）
+    lookalike: list[int]  # マスごとの、同じ画像の中でいちばん形の似た数字のマス（空きや、ほかに数字がないときは -1）
 
 
 def load_gray(image_path: str | Path) -> np.ndarray:
@@ -181,7 +195,7 @@ def read_puzzle(image_path: str | Path, classifier: DigitClassifier | None = Non
     binary = _binarize(board)
     clf = classifier or DigitClassifier()
 
-    grid, conf = [], []
+    grid, conf, alts, feats = [], [], [], {}
     m = CELL // 10  # 罫線を避ける余白
     for r in range(9):
         for c in range(9):
@@ -190,11 +204,111 @@ def read_puzzle(image_path: str | Path, classifier: DigitClassifier | None = Non
             if digit_img is None:
                 grid.append(0)
                 conf.append(1.0)
+                alts.append([])
             else:
-                d, p = clf.predict(normalize_digit(digit_img))
+                norm = normalize_digit(digit_img)
+                d, p, a = clf.predict(norm)
                 grid.append(d)
                 conf.append(p)
-    return Reading(grid, conf, board)
+                alts.append(a)
+                feats[r * 9 + c] = to_feature(norm)
+    return Reading(grid, conf, board, alts, _lookalikes(feats))
+
+
+def _lookalikes(feats: dict[int, np.ndarray]) -> list[int]:
+    """マスごとに、同じ画像の中でいちばん形の似た数字のマスを返す（空きや、ほかに数字がないときは -1）。"""
+    result = [-1] * 81
+    cells = list(feats)
+    if len(cells) < 2:
+        return result
+    sims = np.array([feats[i] for i in cells]) @ np.array([feats[i] for i in cells]).T
+    np.fill_diagonal(sims, -np.inf)
+    for a, i in enumerate(cells):
+        result[i] = cells[int(sims[a].argmax())]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 4. 読み取りの自動修正
+# ---------------------------------------------------------------------------
+def _has_one_solution(grid: list[int]) -> bool:
+    try:
+        return solve(grid, max_solutions=2).solution_count == 1
+    except SudokuError:  # 同じ行・列・ブロックに同じ数字がある
+        return False
+
+
+def _lookalike_groups(grid: list[int], lookalike: list[int]) -> list[list[int]]:
+    """いちばん形の似たマスと同じ数字に読んだマスどうしを、つないでまとめる。
+
+    同じ画像の中で同じ数字が2回以上あるとき、いちばん形の似たマスは同じ数字だった（確認した 21 枚すべて）。
+    同じ形の数字は同じように読み誤るので、まとめて直す。1つだけ直すと、残りを誤ったまま
+    解がちょうど1つの盤面になり、違う答えを出すことがあった（Issue #21 のスクリーンショットの1枚）。
+    """
+    parent = list(range(81))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            i = parent[i]
+        return i
+
+    for i, j in enumerate(lookalike):
+        if j >= 0 and grid[i] == grid[j]:
+            parent[root(i)] = root(j)
+    groups: dict[int, list[int]] = {}
+    for i in range(81):
+        if grid[i]:
+            groups.setdefault(root(i), []).append(i)
+    return list(groups.values())
+
+
+def auto_correct(
+    grid: list[int], alternatives: list[list[int]], lookalike: list[int]
+) -> tuple[list[int], list[int]] | None:
+    """読み取った盤面が成り立たない（重複・解なし・解が複数）とき、ほかの候補の数字に置き換えて直す。
+
+    形の似たマスのまとまり（_lookalike_groups）ごとに、まとまりのどれかのマスのほかの候補の数字に置き換える。
+    置き換えるまとまりの数を 1 つ、2 つ…と MAX_FIXES まで増やし、解がちょうど 1 つになる盤面を探す。
+    最も少ない置き換えで見つかった盤面が 1 つだけで、置き換えを 1 つ増やすと解がちょうど 1 つになる盤面がないなら
+    (直した盤面, 置き換えたマス) を返す。それ以外（盤面が成り立つ・見つからない・1 つに決められない・
+    試す盤面が MAX_TRIALS を超える）は None（そのときは今までどおり利用者に直してもらう）。
+    """
+    if sum(1 for d in grid if d) < 17 or _has_one_solution(grid):
+        return None  # 17 個未満は、どう置き換えても解が 1 つにならない（盤面を見つけ損ねた可能性が高い）
+    groups = []
+    for members in _lookalike_groups(grid, lookalike):
+        digits = sorted({d for i in members for d in alternatives[i]} - {grid[members[0]]})
+        if digits:
+            groups.append((members, digits))
+    trials = 0
+
+    def boards(n: int) -> list[tuple[list[int], list[int]]] | None:
+        """まとまりを n 個置き換えて、解がちょうど 1 つになる盤面の一覧。試す盤面が MAX_TRIALS を超えたら None。"""
+        nonlocal trials
+        found = []
+        for chosen in combinations(groups, n):
+            for digits in product(*(ds for _, ds in chosen)):
+                trials += 1
+                if trials > MAX_TRIALS:
+                    return None
+                trial = grid[:]
+                for (members, _), d in zip(chosen, digits):
+                    for i in members:
+                        trial[i] = d
+                if _has_one_solution(trial):
+                    found.append((trial, sorted(i for members, _ in chosen for i in members)))
+        return found
+
+    for n in range(1, min(MAX_FIXES, len(groups)) + 1):
+        found = boards(n)
+        if found is None or len(found) > 1:
+            return None
+        if found:
+            # 読み誤りが 2 か所あるとき、1 か所だけ直した盤面でも解がちょうど 1 つになり、違う答えを出すことがある
+            # （読み誤りを入れて試すと 3% ほど）。置き換えを 1 つ増やして解が 1 つになる盤面があれば、決めない。
+            more = boards(n + 1) if n < len(groups) else []
+            return found[0] if more == [] else None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +375,15 @@ def main(argv: list[str]) -> int:
             elif result.solution_count > 1:
                 reason, result = "解が複数あり、数字を読み落とした可能性が高い", None
 
+    puzzle = reading.grid
+    fix = auto_correct(puzzle, reading.alternatives, reading.lookalike) if result is None else None
+    if fix:
+        puzzle, fixed = fix
+        changes = "、".join(f"{i // 9 + 1}行{i % 9 + 1}列 {reading.grid[i]}→{puzzle[i]}" for i in fixed)
+        print(f"\n※ 読み取ったままでは解けない（{reason}）ため、数字を自動で直しました: {changes}")
+        print("  元の画像と見比べて、正しいか確かめてください。")
+        result = solve(puzzle)
+
     if result is None:
         print(f"\n解けませんでした（{reason}）。読み取りを誤った可能性があります。")
         print("上の読み取り結果を直してテキストファイルに保存し、`python sudoku_solver.py <ファイル>` で解けます。")
@@ -270,7 +393,7 @@ def main(argv: list[str]) -> int:
     print(format_grid(result.solution))
     if args.output:
         out = Path(args.output)
-        _save_png(out, render_answer(reading.grid, result.solution))
+        _save_png(out, render_answer(puzzle, result.solution))
         print(f"\n解答画像を保存しました: {out}")
     return 0
 

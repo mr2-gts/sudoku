@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { PEERS, SudokuError, UNITS, parse, solve } from "./docs/solver.js";
 import { findHiddenSubset, solveSteps } from "./docs/steps.js";
+import { autoCorrect, lookalikeGroups } from "./docs/vision.js";
 
 const isValid = (g) => [...Array(9)].every((_, k) => {
   const row = new Set(), col = new Set(), box = new Set();
@@ -294,6 +295,50 @@ test("解説の手順: ヒドゥンシングルがなければネイキッドシ
   assert.equal(step.cell, 0);
   assert.equal(step.digit, 9);
   assert.deepEqual(step.seen, { row: [1, 2, 3], col: [4, 5, 6], box: [7, 8] });
+});
+
+// 読み取りの自動修正（Python 版の test_sudoku_image.py の AutoCorrectTest と同じ例）。
+// puzzles/easy.txt の数字を読み誤ったことにして試す。マスの番号は 0〜80（行×9+列、0 から数える）。
+function misreadEasy(misreads, lookalike = new Array(81).fill(-1)) {
+  const truth = parse(readFileSync(new URL("puzzles/easy.txt", import.meta.url), "utf8"));
+  const grid = truth.slice(), alternatives = [...Array(81)].map(() => []);
+  for (const [cell, digit, alts] of misreads) (grid[cell] = digit), (alternatives[cell] = alts);
+  return { truth, grid, alternatives, lookalike };
+}
+
+test("自動修正: 読み誤った数字を、ほかの候補の数字に直す", () => {
+  const { truth, grid, alternatives, lookalike } = misreadEasy([[25, 1, [6]]]); // 3行8列の 6 を 1 と読んだ
+  assert.deepEqual(autoCorrect(grid, alternatives, lookalike), { grid: truth, cells: [25] });
+});
+
+test("自動修正: どちらの数字に直しても解がちょうど1つになるときは、直さない", () => {
+  const { grid, alternatives, lookalike } = misreadEasy([[25, 1, [5, 6]]]);
+  assert.equal(autoCorrect(grid, alternatives, lookalike), null);
+});
+
+test("自動修正: 形の似たマスは、まとめて直す", () => {
+  // 1行5列と 9行8列の 7 を、どちらも 1 と読んだ。1行5列だけを 7 に直しても解がちょうど 1 つになるが、9行8列は 1 のまま
+  const lookalike = new Array(81).fill(-1);
+  (lookalike[4] = 79), (lookalike[79] = 4);
+  const { truth, grid, alternatives } = misreadEasy([[4, 1, [7]], [79, 1, [7]]], lookalike);
+  assert.deepEqual(lookalikeGroups(grid, lookalike).find((g) => g.includes(4)), [4, 79]);
+  assert.deepEqual(autoCorrect(grid, alternatives, lookalike), { grid: truth, cells: [4, 79] });
+  // 形の似たマスがわからなければ、1 つだけ直した盤面と 2 つとも直した盤面のどちらかに決められない
+  assert.equal(autoCorrect(grid, alternatives, new Array(81).fill(-1)), null);
+});
+
+test("自動修正: 置き換えを1つ増やしても解がちょうど1つになるときは、直さない", () => {
+  // 6行1列の 7 を 8、6行5列の 2 を 5 と読んだ。6行1列だけを直しても解がちょうど 1 つになるが、6行5列は誤ったまま
+  const { grid, alternatives, lookalike } = misreadEasy([[45, 8, [7]], [49, 5, [2]]]);
+  assert.equal(autoCorrect(grid, alternatives, lookalike), null);
+});
+
+test("自動修正: 解がちょうど1つの盤面と、数字が17個未満の盤面は直さない", () => {
+  const { truth, alternatives, lookalike } = misreadEasy([[25, 6, [5]]]);
+  assert.equal(autoCorrect(truth, alternatives, lookalike), null);
+  const sparse = new Array(81).fill(0);
+  truth.map((d, i) => (d ? i : -1)).filter((i) => i >= 0).slice(0, 16).forEach((i) => (sparse[i] = truth[i]));
+  assert.equal(autoCorrect(sparse, alternatives, lookalike), null);
 });
 
 // ページが読み込むファイルの URL の版（?v=）は、そのファイルの中身の SHA-256 の先頭 8 桁（tools/stamp_web_versions.py が付ける）。
