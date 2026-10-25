@@ -6,7 +6,8 @@ import { SudokuError, solve } from "./solver.js?v=af66d12c";
 import { solveSteps } from "./steps.js?v=e6e2488c";
 import { t } from "./i18n.js?v=36940c4c";
 
-const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）
+const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）。
+// 大きいまま処理すると、画面のモアレなどで2値化した盤面の外枠が途切れ、盤面を見つけられないこともある（Python 版で確認。Issue #18）
 // 確からしさ（近い見本5件のうち同じ数字の割合）がこれ未満のマスを「不確か」として色を付ける。
 // 5票中3票（0.6）でも、合成画像では3割以上が誤読だったため、4票未満を不確かとする（Python 版と同じ）。
 const UNSURE = 0.8;
