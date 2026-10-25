@@ -3,8 +3,8 @@
 
 import { DigitClassifier, readPuzzle } from "./vision.js?v=e21ac435";
 import { SudokuError, solve } from "./solver.js?v=af66d12c";
-import { solveSteps } from "./steps.js?v=37f0484d";
-import { t } from "./i18n.js?v=219372e9";
+import { solveSteps } from "./steps.js?v=81bd711e";
+import { t } from "./i18n.js?v=3cb41b5f";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）。
 // 大きいまま処理すると、画面のモアレなどで2値化した盤面の外枠が途切れ、盤面を見つけられないこともある（Python 版で確認。Issue #18）
@@ -315,7 +315,12 @@ const TECHNIQUE_NAMES = {
   swordfish: "techSwordfish",
   xyzWing: "techXyzWing",
   jellyfish: "techJellyfish",
+  wWing: "techWWing",
+  simpleColoring: "techSimpleColoring",
+  xChain: "techXChain",
 };
+// シンプルカラーリングの2色の名前（盤面の 1色目は青、2色目は緑）
+const COLOR_NAMES = ["colorBlue", "colorGreen"];
 // ネイキッド／ヒドゥンの手筋の名前（マスの数ごと）
 const SUBSET_NAMES = {
   nakedSubset: { 2: "techNakedPair", 3: "techNakedTriple", 4: "techNakedQuad" },
@@ -332,6 +337,7 @@ function techniqueName(step) {
 
 function reasonText(step) {
   const list = (digits) => digits.join(t("digitSep"));
+  const sorted = (...digits) => list(digits.sort((m, n) => m - n)); // 候補は小さい順に書く
   if (step.technique === "hiddenSingle") {
     const keys = UNIT_TEXT[step.unitKind];
     // ほかに空きマスがなければ、ユニットで最後に残った1マス。ほかの空きマスに置けない理由は、
@@ -363,9 +369,18 @@ function reasonText(step) {
   }
   if (step.technique === "xyWing" || step.technique === "xyzWing") {
     const [x, y, z] = step.digits;
-    const sorted = (...digits) => list(digits.sort((m, n) => m - n)); // 候補は小さい順に書く
     return t(step.technique, { x, y, z, xz: sorted(x, z), yz: sorted(y, z), xyz: sorted(x, y, z) });
   }
+  if (step.technique === "wWing") {
+    const [x, y] = step.digits;
+    return t("wWing", { x, y, xy: sorted(x, y), unit: t(UNIT_TEXT[step.unitKind].unit) });
+  }
+  if (step.technique === "simpleColoring") {
+    if (step.rule === "trap") return t("coloringTrap", { digit: step.digits[0] });
+    const [wrong, right] = [step.wrongColor, 1 - step.wrongColor].map((k) => t(COLOR_NAMES[k]));
+    return t("coloringWrap", { digit: step.digits[0], unit: t(UNIT_TEXT[step.unitKind].unit), wrong, right });
+  }
+  if (step.technique === "xChain") return t("xChain", { digit: step.digits[0] });
   return t("answerStep");
 }
 
@@ -384,7 +399,16 @@ function renderExplainGrid() {
   const removed = new Map(step?.removed?.map((r) => [r.cell, r.digits])); // この手で消した候補
   const reason = state.showReason && step ? step : {};
   const area = new Set(reason.area), blockers = new Set(reason.blockers), excluded = new Set(reason.excluded);
-  const pattern = new Set(reason.removed ? reason.cells : []); // 手筋の形をつくるマス
+  // 手筋の形をつくるマスと、その候補。リンクの両端のマスは、リンクの数字だけ
+  const keys = new Map(reason.removed ? reason.cells.map((c) => [c, reason.digits]) : []);
+  for (const { from, to, digit } of reason.links ?? []) {
+    for (const c of [from, to]) keys.set(c, [...new Set([...(keys.get(c) ?? []), digit])]);
+  }
+  const alt = new Set(reason.colors?.[1]); // シンプルカラーリングの2色目（緑）のマス
+  // 青い枠で示すマス: XY-Wing・XYZ-Wing の軸、W-Wing の2つのマス、X-Chain の両端
+  const outlined = new Set(
+    reason.technique === "wWing" ? reason.pincers : reason.technique === "xChain" ? [reason.cells[0], reason.cells.at(-1)] : [reason.pivot],
+  );
   $("grid").replaceChildren(
     ...board.map((d, i) => {
       const cell = document.createElement("div");
@@ -402,19 +426,80 @@ function renderExplainGrid() {
           const mark = document.createElement("span");
           if (step.cand[i] & (1 << (x - 1)) || gone.includes(x)) mark.textContent = x;
           if (gone.includes(x)) mark.className = "removed";
-          else if (pattern.has(i) && reason.digits.includes(x)) mark.className = "key";
+          else if (keys.get(i)?.includes(x)) mark.className = alt.has(i) ? "key-alt" : "key";
           cell.append(mark);
         }
       }
       if (area.has(i)) cell.classList.add("area");
       if (blockers.has(i)) cell.classList.add("blocker");
-      if (pattern.has(i)) cell.classList.add("pattern");
-      if (i === reason.pivot) cell.classList.add("pivot"); // XY-Wing の軸
+      if (keys.has(i)) cell.classList.add(alt.has(i) ? "pattern-alt" : "pattern");
+      if (outlined.has(i)) cell.classList.add("pivot");
       if (removed.has(i)) cell.classList.add("changed");
       if (i === step?.cell) cell.classList.add("current");
       return cell;
     }),
+    ...(reason.links ? [linkLayer(reason.links)] : []),
   );
+}
+
+// チェーン系の手筋のリンクを、盤面に重ねる線で描く（強いリンクは実線、弱いリンクは点線）。
+// 座標は、盤面の左上を (0, 0) とし、1マスを 1 とする
+const SVG_NS = "http://www.w3.org/2000/svg";
+const LINK_GAP = 0.15; // 線の端を、候補の数字に重ならないよう中心から離す長さ
+// 線は、途中のマスの大きな数字を横切らないよう、候補から横にずらした位置を通す。候補がマスの端寄り（9 なら右下）なら
+// その端の側へ、中央寄りなら盤面の中心の側へ、マスの境目の少し手前（候補から境目までの LINK_ROOM 倍）までずらす。
+// 長い線は、両端のマスの中で曲がってずらした位置に移り、そこをまっすぐ進む。隣のマスへの短い線は弓なりに曲げるだけにする
+const LINK_ROOM = 0.8, LINK_SHORT = 1.2;
+
+// 候補 digit の、マスの中での位置（0〜1。候補は 3x3 に並べている）
+const candidateOffset = (digit) => [(((digit - 1) % 3) + 0.5) / 3, (Math.floor((digit - 1) / 3) + 0.5) / 3];
+
+// 2次ベジェ曲線 p0 →（制御点 c）→ p2 の p0 側を、p0 から LINK_GAP 離れるところまで切り落とす。[新しい始点, 新しい制御点] を返す
+function trimBezier(p0, c, p2) {
+  const at = (t) => [0, 1].map((k) => (1 - t) ** 2 * p0[k] + 2 * t * (1 - t) * c[k] + t ** 2 * p2[k]);
+  let t = 0;
+  while (t < 0.5 && Math.hypot(at(t)[0] - p0[0], at(t)[1] - p0[1]) < LINK_GAP) t += 0.01;
+  return [at(t), [0, 1].map((k) => (1 - t) * c[k] + t * p2[k])];
+}
+
+function linkLayer(links) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "links");
+  svg.setAttribute("viewBox", "0 0 9 9");
+  svg.setAttribute("aria-hidden", "true");
+  for (const { from, to, digit, strong } of links) {
+    const [fx, fy] = candidateOffset(digit);
+    const [x1, y1] = [(from % 9) + fx, Math.floor(from / 9) + fy], [x2, y2] = [(to % 9) + fx, Math.floor(to / 9) + fy];
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    const [ux, uy] = [(x2 - x1) / len, (y2 - y1) / len]; // 線の向き
+    let [nx, ny] = [-uy, ux]; // ずらす向き（線に垂直）
+    const side = nx * (fx - 0.5) + ny * (fy - 0.5);
+    const [mx, my] = [(x1 + x2) / 2, (y1 + y2) / 2];
+    if (side < 0 || (side === 0 && nx * (4.5 - mx) + ny * (4.5 - my) < 0)) [nx, ny] = [-nx, -ny];
+    // 候補から、ずらす向きにマスの境目までの長さ
+    const room = Math.min(...[[nx, fx], [ny, fy]].filter(([n]) => n !== 0).map(([n, f]) => (n > 0 ? 1 - f : f) / Math.abs(n)));
+    const shift = LINK_ROOM * room;
+    const p1 = [x1, y1], p2 = [x2, y2];
+    let d;
+    if (len < LINK_SHORT) {
+      // 両端を切り落とした弓なりの曲線（頂点のずれは shift の半分）
+      const [s, c] = trimBezier(p1, [mx + nx * shift, my + ny * shift], p2);
+      const [e, c2] = trimBezier(p2, c, s);
+      d = `M ${s} Q ${c2} ${e}`;
+    } else {
+      // 両端のマスの中で曲がってずらした位置に移り（a、b）、その間はまっすぐ進む
+      const turn = Math.max(shift, 0.25); // ずらした位置に移るまでに、線の向きに進む長さ
+      const c1 = [x1 + nx * shift, y1 + ny * shift], c2 = [x2 + nx * shift, y2 + ny * shift];
+      const a = [c1[0] + ux * turn, c1[1] + uy * turn], b = [c2[0] - ux * turn, c2[1] - uy * turn];
+      const [s, sc] = trimBezier(p1, c1, a), [e, ec] = trimBezier(p2, c2, b);
+      d = `M ${s} Q ${sc} ${a} L ${b} Q ${ec} ${e}`;
+    }
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("class", strong ? "strong" : "weak");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
 }
 
 // ---------------------------------------------------------------------------
