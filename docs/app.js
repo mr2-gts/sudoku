@@ -3,8 +3,8 @@
 
 import { DigitClassifier, readPuzzle } from "./vision.js?v=e21ac435";
 import { SudokuError, solve } from "./solver.js?v=af66d12c";
-import { solveSteps } from "./steps.js?v=c0576fb3";
-import { t } from "./i18n.js?v=fda75771";
+import { solveSteps } from "./steps.js?v=37f0484d";
+import { t } from "./i18n.js?v=219372e9";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）。
 // 大きいまま処理すると、画面のモアレなどで2値化した盤面の外枠が途切れ、盤面を見つけられないこともある（Python 版で確認。Issue #18）
@@ -313,14 +313,20 @@ const TECHNIQUE_NAMES = {
   xWing: "techXWing",
   xyWing: "techXyWing",
   swordfish: "techSwordfish",
+  xyzWing: "techXyzWing",
+  jellyfish: "techJellyfish",
+};
+// ネイキッド／ヒドゥンの手筋の名前（マスの数ごと）
+const SUBSET_NAMES = {
+  nakedSubset: { 2: "techNakedPair", 3: "techNakedTriple", 4: "techNakedQuad" },
+  hiddenSubset: { 2: "techHiddenPair", 3: "techHiddenTriple", 4: "techHiddenQuad" },
 };
 
 // 手筋の名前（答えから置いた手は名前なし）
 function techniqueName(step) {
   if (step.technique === "answer") return "";
   if (step.technique === "hiddenSingle" && !step.excluded.length) return t("techFullHouse");
-  if (step.technique === "nakedSubset") return t(step.cells.length === 2 ? "techNakedPair" : "techNakedTriple");
-  if (step.technique === "hiddenSubset") return t(step.cells.length === 2 ? "techHiddenPair" : "techHiddenTriple");
+  if (SUBSET_NAMES[step.technique]) return t(SUBSET_NAMES[step.technique][step.cells.length]);
   return t(TECHNIQUE_NAMES[step.technique]);
 }
 
@@ -352,13 +358,13 @@ function reasonText(step) {
   if (step.technique === "nakedSubset" || step.technique === "hiddenSubset") {
     return t(step.technique, { unit: t(UNIT_TEXT[step.unitKind].unit), count: step.cells.length, digits: list(step.digits) });
   }
-  if (step.technique === "xWing" || step.technique === "swordfish") {
+  if (step.technique === "xWing" || step.technique === "swordfish" || step.technique === "jellyfish") {
     return t(step.technique, { bases: t(UNIT_TEXT[step.baseKind].units), covers: t(UNIT_TEXT[step.coverKind].units), digit: step.digits[0] });
   }
-  if (step.technique === "xyWing") {
+  if (step.technique === "xyWing" || step.technique === "xyzWing") {
     const [x, y, z] = step.digits;
-    const pair = (a, b) => list([a, b].sort((m, n) => m - n)); // 羽の候補は小さい順に書く
-    return t("xyWing", { x, y, z, xz: pair(x, z), yz: pair(y, z) });
+    const sorted = (...digits) => list(digits.sort((m, n) => m - n)); // 候補は小さい順に書く
+    return t(step.technique, { x, y, z, xz: sorted(x, z), yz: sorted(y, z), xyz: sorted(x, y, z) });
   }
   return t("answerStep");
 }

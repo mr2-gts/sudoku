@@ -5,7 +5,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 import { PEERS, SudokuError, parse, solve } from "./docs/solver.js";
-import { solveSteps } from "./docs/steps.js";
+import { findHiddenSubset, solveSteps } from "./docs/steps.js";
 
 const isValid = (g) => [...Array(9)].every((_, k) => {
   const row = new Set(), col = new Set(), box = new Set();
@@ -74,27 +74,30 @@ function checkSteps(grid) {
         assert.deepEqual(s.area.filter((c) => s.digits.some((d) => cand[c] & bitOf(d))), s.cells);
         assert.ok(removedCells.every((c) => s.cells.includes(c)));
         assert.ok(s.removed.every((r) => r.digits.every((d) => !s.digits.includes(d))));
-      } else if (s.technique === "xyWing") {
-        // 軸の候補は x・y、2つの羽は x・z と y・z で、どちらも軸から見える。両方の羽から見えるマスから z だけを消す
+      } else if (s.technique === "xyWing" || s.technique === "xyzWing") {
+        // 軸の候補は x・y（XYZ-Wing は x・y・z）、2つの羽は x・z と y・z で、どちらも軸から見える。
+        // 両方の羽（XYZ-Wing は軸も）から見えるマスから z だけを消す
         const [x, y, z] = s.digits;
         const [pivot, a, b] = s.cells;
+        const xyz = s.technique === "xyzWing";
         assert.equal(s.pivot, pivot);
         assert.deepEqual(s.pincers, [a, b]);
-        assert.equal(cand[pivot], bitOf(x) | bitOf(y));
+        assert.equal(cand[pivot], bitOf(x) | bitOf(y) | (xyz ? bitOf(z) : 0));
         assert.equal(cand[a], bitOf(x) | bitOf(z));
         assert.equal(cand[b], bitOf(y) | bitOf(z));
         assert.ok(PEERS[pivot].includes(a) && PEERS[pivot].includes(b));
-        assert.ok(s.removed.every((r) => PEERS[a].includes(r.cell) && PEERS[b].includes(r.cell)));
+        const watchers = xyz ? [pivot, a, b] : [a, b];
+        assert.ok(s.removed.every((r) => watchers.every((c) => PEERS[c].includes(r.cell))));
         assert.ok(s.removed.every((r) => r.digits.length === 1 && r.digits[0] === z));
       } else {
-        assert.ok(["lockedCandidates", "xWing", "swordfish"].includes(s.technique));
+        assert.ok(["lockedCandidates", "xWing", "swordfish", "jellyfish"].includes(s.technique));
         assert.equal(s.digits.length, 1);
         assert.ok(s.cells.every((c) => cand[c] & bitOf(s.digits[0])));
         assert.ok(removedCells.every((c) => !s.cells.includes(c)));
         if (s.technique !== "lockedCandidates") {
-          // X-Wing は2本、ソードフィッシュは3本の行（列）にあるマスが、同じ本数の列（行）に収まる。
+          // X-Wing は2本、ソードフィッシュは3本、ジェリーフィッシュは4本の行（列）にあるマスが、同じ本数の列（行）に収まる。
           // その行（列）で digit が入りうるマスはすべて cells にあり、候補を消すのは列（行）の、cells の行（列）以外のマス
-          const n = s.technique === "xWing" ? 2 : 3;
+          const n = { xWing: 2, swordfish: 3, jellyfish: 4 }[s.technique];
           const [baseOf, coverOf] = s.baseKind === "row" ? [(c) => Math.floor(c / 9), (c) => c % 9] : [(c) => c % 9, (c) => Math.floor(c / 9)];
           const bases = new Set(s.cells.map(baseOf)), covers = new Set(s.cells.map(coverOf));
           assert.equal(bases.size, n);
@@ -146,7 +149,7 @@ test("解説の手順: hard は扱う手筋で進めないので、答えから�
   assert.equal(steps[0].technique, "answer");
 });
 
-// テスト用に乱数で作った問題（解は一意）。6問で、候補を消す手筋をすべて使う
+// テスト用に乱数で作った問題（解は一意）。8問で、ヒドゥンクアッドとジェリーフィッシュ以外の候補を消す手筋をすべて使う
 const TECHNIQUE_PUZZLES = [
   "....43.2.4.37....5...2..9.........8..9....3..2.7..14...468.97....25.....8..3.4...",
   ".2..7.8.1..89...........75.....89..2..45...........1.6..726...9.....8.....67..4.5",
@@ -154,6 +157,8 @@ const TECHNIQUE_PUZZLES = [
   "...7..368...3.....2....94...8..96.1....5......6.....4.6.29....3.7..3..2.9......51",
   "7..9..46..91..5.....87.2.....6..7158....3..9..8.....73.24.........2......1.......", // XY-Wing
   "........9..4.137.....6..3.8.52....4..389.......1.8.........6....2..7.19.4......2.", // ソードフィッシュ
+  "....5...91.53.7.....9...3....8...2..69.1....4..2.7..61543..2.7...1..4..2...5.....", // XYZ-Wing
+  "..9....7..3........4...7.65.......2...14....6.8..3...78..5.....15...4..8.7.2.8..3", // ネイキッドクアッド
 ];
 
 test("解説の手順: 候補を消す手筋を使えば、答えから置かずに最後まで解ける", () => {
@@ -166,8 +171,30 @@ test("解説の手順: 候補を消す手筋を使えば、答えから置かず
       else if (s.removed) used.add(s.technique.endsWith("Subset") ? `${s.technique}${s.cells.length}` : s.technique);
     }
   }
-  const all = ["claiming", "hiddenSubset2", "hiddenSubset3", "nakedSubset2", "nakedSubset3", "pointing", "swordfish", "xWing", "xyWing"];
+  const all = ["claiming", "hiddenSubset2", "hiddenSubset3", "nakedSubset2", "nakedSubset3", "nakedSubset4", "pointing", "swordfish", "xWing", "xyWing", "xyzWing"];
   assert.deepEqual([...used].sort(), all);
+});
+
+test("解説の手順: ジェリーフィッシュも正しく使う", () => {
+  // ジェリーフィッシュが必要で、答えから置かずに最後まで解ける問題は、乱数で 20 分探しても見つからなかった（まれなため）。
+  // 途中で答えから置く手がある問題で、ジェリーフィッシュを含むすべての手が正しいことを確かめる
+  const steps = checkSteps(parse("9....6....1.9....86..85..7..3....1.98.6....2.19...3.......2..6.......5.2..7.6...1"));
+  assert.ok(steps.some((s) => s.technique === "jellyfish"));
+});
+
+test("解説の手順: ヒドゥンクアッドを見つける", () => {
+  // 1行目の9マスがすべて空きで、1〜4 が入りうるのは左の4マスだけ（そこには 5・6 も入りうる）。ほかのマスは空きでない扱い。
+  // ヒドゥンクアッドが必要になるのは、空きマスが9つのユニットだけなので、問題からではなく候補の状態を直接与える
+  const bits = (...digits) => digits.reduce((m, d) => m | bitOf(d), 0);
+  const cand = new Array(81).fill(0);
+  for (let c = 0; c < 4; c++) cand[c] = bits(1, 2, 3, 4, 5, 6);
+  for (let c = 4; c < 9; c++) cand[c] = bits(5, 6, 7, 8, 9);
+  const step = findHiddenSubset(cand, 4);
+  assert.equal(step.technique, "hiddenSubset");
+  assert.equal(step.unitKind, "row");
+  assert.deepEqual(step.cells, [0, 1, 2, 3]);
+  assert.deepEqual(step.digits, [1, 2, 3, 4]);
+  assert.deepEqual(step.removed, [0, 1, 2, 3].map((cell) => ({ cell, digits: [5, 6] })));
 });
 
 test("解説の手順: 空きが1つだけのユニットは、ほかの空きマスなしのヒドゥンシングル", () => {
