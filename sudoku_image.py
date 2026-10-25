@@ -35,6 +35,7 @@ from sudoku_solver import SudokuError, format_grid, solve
 CELL = 50  # 補正後の1マスのピクセル数
 BOARD = CELL * 9
 MODEL_PATH = Path(__file__).with_name("digit_model.npz")
+MAX_SIDE = 1200  # 大きな写真はこの大きさまで縮小してから読み取る（Web 版と同じ。理由は load_gray を参照）
 MIN_CONTRAST = 45  # 数字とみなす濃さの下限（背景の明るさとの差、0〜255）。写真の数字は 60 以上、ノイズは 40 以下だった
 WEAK_CONTRAST_RATIO = 0.25  # 数字の濃い部分の何割の濃さまでを、つながった線として数字に含めるか
 WEAK_CONTRAST_MIN = 15  # 同上の下限（背景の明るさとの差）
@@ -153,14 +154,29 @@ class Reading:
     board: np.ndarray  # 補正後の盤面画像（グレースケール）
 
 
-def read_puzzle(image_path: str | Path, classifier: DigitClassifier | None = None) -> Reading:
+def load_gray(image_path: str | Path) -> np.ndarray:
+    """画像をグレースケールで読み込み、読み取りに向く大きさにそろえる（Web 版の loadGray と同じ）。
+
+    長辺が MAX_SIDE を超える写真は縮小する。大きいまま処理すると、画面のモアレなどの細かい模様で
+    2値化した盤面の外枠が途切れ、盤面を見つけられずに画像全体を盤面とみなしてしまうことがある
+    （縮小すると周りの画素が平均されて線がつながる。Issue #18）。小さい画像は拡大する。
+    """
     data = np.fromfile(str(image_path), np.uint8)  # 日本語のファイル名でも読めるようにする
-    img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
+    img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)  # 写真の向き（EXIF）は OpenCV が補正する
     if img is None:
         raise ImageReadError(f"画像を開けません: {image_path}")
-    if max(img.shape) < 300:  # 小さい画像は拡大してから処理する
+    h, w = img.shape
+    if max(h, w) > MAX_SIDE:
+        s = MAX_SIDE / max(h, w)
+        # 大きさの丸めは Web 版（Math.round）と同じ。周りの画素の平均で縮小する（INTER_AREA）
+        img = cv2.resize(img, (int(w * s + 0.5), int(h * s + 0.5)), interpolation=cv2.INTER_AREA)
+    elif max(h, w) < 300:
         img = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    return img
 
+
+def read_puzzle(image_path: str | Path, classifier: DigitClassifier | None = None) -> Reading:
+    img = load_gray(image_path)
     board = warp_board(img, find_board(img))
     binary = _binarize(board)
     clf = classifier or DigitClassifier()
