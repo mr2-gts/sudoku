@@ -1,10 +1,10 @@
 // 画面の操作（写真の読み込み → 読み取り → 解く → 表示、読み取り結果の修正、解き方の解説）
 // 写真はこのページの中（メモリ上）だけで扱い、送信も保存もしない。
 
-import { DigitClassifier, readPuzzle } from "./vision.js?v=e21ac435";
+import { DigitClassifier, autoCorrect, readPuzzle } from "./vision.js?v=3ada0f02";
 import { SudokuError, solve } from "./solver.js?v=af66d12c";
 import { solveSteps } from "./steps.js?v=81bd711e";
-import { t } from "./i18n.js?v=3cb41b5f";
+import { t } from "./i18n.js?v=fbad9f19";
 
 const MAX_SIDE = 1200; // 大きな写真はこの大きさまで縮小してから読み取る（処理時間を抑えるため）。
 // 大きいまま処理すると、画面のモアレなどで2値化した盤面の外枠が途切れ、盤面を見つけられないこともある（Python 版で確認。Issue #18）
@@ -74,10 +74,12 @@ async function readPhoto(source) {
   try {
     const [gray, classifier] = await Promise.all([loadGray(source), classifierPromise]);
     const reading = readPuzzle(gray, classifier);
-    state.puzzle = reading.grid;
+    const fix = autoCorrect(reading.grid, reading.alternatives, reading.lookalike);
+    state.puzzle = fix ? fix.grid : reading.grid;
     state.confidence = reading.confidence;
+    fix?.cells.forEach((i) => (state.confidence[i] = 0)); // 自動で直したマスは「不確か」の黄色で示し、確かめてもらう
     drawPreview(reading.board);
-    solveAndShow();
+    solveAndShow(fix ? fix.cells.length : 0);
   } catch (e) {
     console.error(e);
     setStatus(t("readError", { message: e.message }), true);
@@ -150,7 +152,8 @@ function takeShot() {
 // ---------------------------------------------------------------------------
 // 解く（読み取りの誤りを見分ける判定は Python 版と同じ）
 // ---------------------------------------------------------------------------
-function solveAndShow() {
+// fixed: 読み取りを自動で直したマスの数（知らせるため）
+function solveAndShow(fixed = 0) {
   const clues = state.puzzle.filter((d) => d).length;
   state.solution = null;
   let reason = "";
@@ -174,7 +177,7 @@ function solveAndShow() {
 
   $("result").hidden = false;
   if (state.solution) {
-    setStatus(t("solved"));
+    setStatus(fixed ? t("solvedFixed", { count: fixed }) : t("solved"));
     setEditing(false);
   } else {
     setStatus(t("unsolved", { reason }), true);
@@ -518,7 +521,7 @@ $("picker").addEventListener("change", onPhoto);
 $("shutter").addEventListener("click", takeShot);
 $("camera-cancel").addEventListener("click", closeCamera);
 window.addEventListener("popstate", closeCamera);
-$("solve").addEventListener("click", solveAndShow);
+$("solve").addEventListener("click", () => solveAndShow()); // クリックのイベントを fixed に渡さない
 $("explain-start").addEventListener("click", startExplain);
 $("explain-end").addEventListener("click", endExplain);
 $("step-prev").addEventListener("click", () => moveStep(-1));
